@@ -186,21 +186,21 @@ def check_folder(text, taken, user):
     if not re.fullmatch(r"/[A-Za-z0-9._/-]+", folder):
         raise Problem("Use only letters, numbers, - _ . and / in the folder.")
     folder = os.path.normpath(folder)
-    if folder in ("/", "/home", "/mnt", "/media", "/srv"):
+    if folder in ("/", "/home", "/media", "/srv"):
         raise Problem(f"{folder} itself cannot be used. Pick a folder inside it, for example /mnt/games.")
     for system in SYSTEM_FOLDERS:
         if folder == system or folder.startswith(system + "/"):
             raise Problem(f"{folder} is a folder the system itself needs. Pick one under /mnt, for example /mnt/games.")
     if re.fullmatch(r"/home/[^/]+", folder):
         raise Problem(f"{folder} is a whole home folder. Pick one inside it, for example /home/{user}/Games, or one under /mnt.")
-    for other in taken:
-        if folder == other:
-            raise Problem(f"{folder} is already used for another drive.")
-        if folder.startswith(other + "/") or other.startswith(folder + "/"):
-            raise Problem(f"{folder} would be inside {other} (or the other way round), which is used for another drive.")
+    if folder in taken:
+        raise Problem(f"{folder} is already used for another drive.")
+    # Drives inside each other (/mnt and /mnt/games) are fine: systemd mounts the outer one
+    # first. The empty folders other drives open at do not count as files in the way.
     if os.path.isdir(folder) and not os.path.ismount(folder):
         try:
-            if os.listdir(folder):
+            inside = {os.path.join(folder, name) for name in os.listdir(folder)}
+            if inside - set(taken):
                 raise Problem(f"{folder} already has files in it. They would be hidden behind the drive, so pick another folder.")
         except PermissionError:
             raise Problem(f"{folder} already exists and cannot be looked into. Pick another folder.")

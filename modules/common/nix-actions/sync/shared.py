@@ -117,6 +117,17 @@ def trim_lock(lock):
 def lock_text(lock):
     return json.dumps(lock, indent=2, sort_keys=True) + "\n"
 
+def release_manifest(root):
+    """manifest() of the copy export() would make: flake.lock fingerprinted as trimmed."""
+    found = manifest(root)
+    lock_path = os.path.join(root, "flake.lock")
+    if "flake.lock" in found:
+        with open(lock_path, encoding="utf-8") as f:
+            text = lock_text(trim_lock(json.load(f)))
+        found["flake.lock"] = hashlib.sha256(text.encode()).hexdigest()
+    return found
+
+
 def copy_file(src, dst):
     """Copies a file so its owner can change the copy (files from the Nix store are read-only)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)

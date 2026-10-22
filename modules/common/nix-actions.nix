@@ -75,6 +75,15 @@ let
   releases = syncScript "nix-actions-releases" { install = "${installRelease}"; };
   publish = terminalScript "nix-actions-publish" "sync/publish.sh" { "@sync@" = q "${syncTool}"; };
 
+  isoOn = publisher && builtins.pathExists ../../iso;
+  isoBuilder = terminalScript "nix-actions-iso" "iso.sh" {
+    "@flakeDir@" = q config.myOS.flakeDir;
+    "@nix@" = q "${nix}/bin/nix";
+    "@python@" = q "${pkgs.python3}/bin/python3";
+    "@shared@" = q "${syncDir + "/shared.py"}";
+    "@xdgOpen@" = q "${pkgs.xdg-utils}/bin/xdg-open";
+  };
+
   gcOptions = config.nix.gc.options;
   olderThan = builtins.match ".*--delete-older-than ([0-9]+)d.*" gcOptions;
   deleteAll = builtins.match "(.* )?(-d|--delete-old)( .*)?" gcOptions != null;
@@ -206,6 +215,7 @@ let
             cleanup = "${cleanup}";
             install = "${installRelease}";
             publish = if syncOn && publisher then "${publish}" else null;
+            iso = if isoOn then "${isoBuilder}" else null;
           };
           flakes = flakesCommand;
           drives = lib.optionalString drivesOn "${drives}";
@@ -230,7 +240,7 @@ let
   };
 
   menuCommand = lib.extendDerivation true
-    { scripts = { inherit rebuild update cleanup drives passwords secretWriter installRelease syncTool releases publish appDrivesTool appMover appDrives window windowScript; }; }
+    { scripts = { inherit rebuild update cleanup drives passwords secretWriter installRelease syncTool releases publish appDrivesTool appMover appDrives window windowScript isoBuilder; }; }
     (pkgs.writeShellScriptBin "nix-actions" (fill
       {
         "@window@" = q "${window}/bin/nix-actions-window";

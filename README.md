@@ -4,4 +4,4 @@ This repository is written by **Nix Actions → Publish changes**. Do not change
 
 Computers running Noid-OS install a new release with **Nix Actions → Get the latest release**. Each computer keeps its own `hosts/` folder (its hardware, drives and choices), which is never part of this repository.
 
-Latest: release 2 (2026-10-22): zhuzhed up the Nix-Actions panel (all hail our AI overlord)
+Latest: release 3 (2026-10-22): Nix actions cleanup

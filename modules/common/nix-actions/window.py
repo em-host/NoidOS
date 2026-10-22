@@ -291,6 +291,13 @@ class Window(Adw.ApplicationWindow):
         self.cleanup_row, _ = action_row("Clean up", SETTINGS["cleanupText"], "noid-user-trash-symbolic", "Clean up",
                                          lambda: self.start([scripts["cleanup"]], "Clean up opened in a terminal window."))
         maintenance.add(self.cleanup_row)
+        if scripts.get("iso"):
+            row, _ = action_row("Generate ISO",
+                                "Build the install ISO from this folder, to set up Noid-OS on another computer. "
+                                "It is saved in the folder \"Noid-OS ISO\" in your home folder.",
+                                "noid-media-optical-symbolic", "Generate",
+                                lambda: self.start([scripts["iso"]], "Generating the ISO in a terminal window."))
+            maintenance.add(row)
         page.add(maintenance)
         self.refresh_cleanup()
 

@@ -135,6 +135,14 @@ let
     })
     (lib.filterAttrs (_: d: d.apps && lib.elem d.fsType linuxTypes) (config.myOS.drives or { }));
 
+  # Stores list each installation's remote by its title, which is "Flathub" in every one;
+  # remote-modify --title sets one that later summary updates do not overwrite.
+  remoteTitle = r: where:
+    "${if r.name == "flathub" then "Flathub" else r.name} (${where})";
+  labelRemotes = installFlag: where: lib.concatMapStrings (r: ''
+    ${flatpak} remote-modify ${installFlag} --title=${lib.escapeShellArg (remoteTitle r where)} ${lib.escapeShellArg r.name}
+  '') config.services.flatpak.remotes;
+
   locations = lib.optionalAttrs fp.driveLocations driveLocations
     // lib.mapAttrs (_: l: l // { mountPoint = null; }) fp.locations;
 
@@ -341,8 +349,23 @@ in
         '' + lib.concatMapStrings (r: ''
           ${flatpak} remote-add --installation=${id} --if-not-exists ${lib.optionalString (r.args or null != null) r.args} \
             ${lib.optionalString (r.gpg-import or null != null) "--gpg-import=${r.gpg-import}"} ${lib.escapeShellArg r.name} ${lib.escapeShellArg r.location}
-        '') config.services.flatpak.remotes;
+        '') config.services.flatpak.remotes + labelRemotes "--installation=${id}" l.name;
       }) locations
+      // {
+        flatpak-label-main = {
+          description = "Name the main drive's Flatpak sources";
+          wantedBy = [ "multi-user.target" ];
+          wants = [ "network-online.target" ];
+          after = [ "network-online.target" "flatpak-managed-install.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            Restart = "on-failure";
+            RestartSec = 60;
+          };
+          script = labelRemotes "--system" "Main drive";
+        };
+      }
       // lib.optionalAttrs fp.autoUpdate {
         flatpak-locations-update = {
           description = "Update Flatpak apps on other drives";
