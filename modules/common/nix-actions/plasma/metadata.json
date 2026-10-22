@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "NixOS config"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Opens the Nix Actions menu: rebuild, update, add a flake, clean up",
+        "EnabledByDefault": true,
+        "Icon": "system-software-update",
+        "Id": "org.nixos.rebuildbutton",
+        "License": "MIT",
+        "Name": "Nix Actions",
+        "Version": "2.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

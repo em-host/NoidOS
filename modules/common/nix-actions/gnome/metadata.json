@@ -1,0 +1,7 @@
+{
+  "uuid": "nixos-rebuild-button@nixos-config",
+  "name": "Nix Actions",
+  "description": "Adds a button next to the power button in the system menu that opens the Nix Actions menu: rebuild, update, add a flake, clean up.",
+  "shell-version": [ "45", "46", "47", "48", "49", "50", "51" ],
+  "version": 2
+}

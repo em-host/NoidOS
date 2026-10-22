@@ -1,0 +1,42 @@
+{ config, pkgs, lib, ... }:
+
+let
+  cfg = config.module.printing;
+  currentDE = config.myOS.DE;
+
+  # Pull the username from your user.nix module
+  user = config.myOS.username;
+in
+{
+  options.module.printing = {
+    enable = lib.mkEnableOption "the 3D Printing suite, viewers, and directories";
+  };
+
+  config = lib.mkIf cfg.enable {
+
+    # We wrap the user-level configuration in this block so NixOS
+    # knows to hand it off to Home Manager.
+    home-manager.users.${user} = {
+
+      home.packages = with pkgs; [
+        orca-slicer
+        f3d
+      ];
+
+      home.file."Printing/.keep".text = "";
+
+      home.file.".config/gtk-3.0/bookmarks" = lib.mkIf (currentDE == "gnome" || currentDE == "cosmic") {
+        # Note: I swapped 'config.home.homeDirectory' for a hardcoded
+        # string using your 'user' variable. This prevents scope-shadowing
+        # issues between the NixOS config and the Home Manager config.
+        text = ''
+          file:///home/${user}/Printing 3D Printing
+        '';
+      };
+
+      home.file.".local/share/user-places.xbel" = lib.mkIf (currentDE == "plasma") {
+         # (Left blank for manual drag-and-drop, or insert XML here)
+      };
+    };
+  };
+}
