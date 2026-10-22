@@ -1,12 +1,10 @@
 set -u
 
-# The @...@ placeholders below are filled in by ../nix-actions.nix.
 busctl=@busctl@
 script_file=@scriptFile@
 
 js="$(cat "$script_file")"
 
-# Ask the running Plasma shell to run place-widget.js.
 # Prints what the script reported: added / present / no-panel / unknown-widget
 run_in_plasma() {
   "$busctl" --user call org.kde.plasmashell /PlasmaShell \

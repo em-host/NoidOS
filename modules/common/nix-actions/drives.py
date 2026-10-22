@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Nix Actions -> Drives: open another drive at a fixed folder on every start.
-
-Lists the drives this computer does not use yet (the way the hardware scan finds
-them), asks for a folder, writes hosts/drives.nix (read by
-modules/common/drives.nix) and offers to rebuild. Removes one again the same way.
-Runs as you: nothing here needs the password, the rebuild asks for it.
-
-The @...@ gaps are filled in by ../nix-actions.nix.
-"""
+"""Nix Actions -> Drives: mount extra drives at fixed folders (writes hosts/drives.nix)."""
 import json
 import os
 import re
@@ -17,7 +9,7 @@ import sys
 SETTINGS = json.loads(r"""@settings@""")  # zenity, lsblk, nix, git, flakeDir, rebuild, user
 TITLE = "Drives"
 SUPPORTED = {"ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs", "ntfs", "exfat", "vfat"}
-# Partitions that belong to the boot process or to Windows itself.
+APP_FILESYSTEMS = {"ext4", "ext3", "ext2", "btrfs", "xfs", "f2fs"}
 SYSTEM_PARTITIONS = {
     "EFI System",
     "BIOS boot",
@@ -34,34 +26,23 @@ HEADER = """\
 # or delete its lines here and Rebuild.
 """
 
-
 class Problem(Exception):
     pass
-
-
-# ---------------------------------------------------------------------------
-# Windows
-# ---------------------------------------------------------------------------
-
 
 def zenity(*args):
     result = subprocess.run([SETTINGS["zenity"], f"--title={TITLE}", *args], capture_output=True, text=True)
     return result.returncode, result.stdout.strip()
 
-
 def info(text):
     zenity("--info", "--no-markup", "--width=480", f"--text={text}")
 
-
 def error(text):
     zenity("--error", "--no-markup", "--width=480", f"--text={text}")
-
 
 def ask(text, ok="Yes", cancel="No"):
     code, _ = zenity("--question", "--no-markup", "--width=480", f"--text={text}",
                      f"--ok-label={ok}", f"--cancel-label={cancel}")
     return code == 0
-
 
 def choose(text, columns, rows, ok="Next"):
     """rows: lists of strings, the first one hidden (it is what comes back)."""
@@ -74,19 +55,12 @@ def choose(text, columns, rows, ok="Next"):
     code, out = zenity(*args)
     return out.split("|")[0] if code == 0 and out else None
 
-
-# ---------------------------------------------------------------------------
-# What is there, and what is already used
-# ---------------------------------------------------------------------------
-
-
 def size_text(size):
     size = int(size or 0)
     for unit, step in (("TB", 1000**4), ("GB", 1000**3), ("MB", 1000**2)):
         if size >= step:
             return f"{size / step:.1f} {unit}" if size < 10 * step else f"{size / step:.0f} {unit}"
     return f"{size} B"
-
 
 def flatten(devices, disk=None):
     for device in devices or []:
@@ -95,7 +69,6 @@ def flatten(devices, disk=None):
             here = device
         yield device, here
         yield from flatten(device.get("children"), here)
-
 
 def fstab_entries(path="/etc/fstab"):
     """-> (devices, folders) named in fstab: devices as UUID=, /dev/... or LABEL=."""
@@ -111,7 +84,6 @@ def fstab_entries(path="/etc/fstab"):
         pass
     return devices, folders
 
-
 def in_use(device, fstab_devices):
     uuid, label, path = device.get("uuid"), device.get("label"), device.get("path")
     names = {f"UUID={uuid}", f"/dev/disk/by-uuid/{uuid}", path}
@@ -121,7 +93,6 @@ def in_use(device, fstab_devices):
         return True
     system = {"/", "/boot", "/nix", "/home", "[SWAP]"}
     return any(m in system for m in (device.get("mountpoints") or []) if m)
-
 
 def candidates(lsblk_json, fstab_devices, configured_uuids):
     """The drives that could be added: [(uuid, label, size, kind, disk text, device)]."""
@@ -139,7 +110,6 @@ def candidates(lsblk_json, fstab_devices, configured_uuids):
         found.append((uuid, device.get("label") or "", size_text(device.get("size")), kind, model, device))
     return found
 
-
 def scan():
     result = subprocess.run(
         [SETTINGS["lsblk"], "--json", "--bytes", "--output",
@@ -150,15 +120,8 @@ def scan():
         raise Problem(f"The drives could not be listed: {result.stderr.strip()}")
     return json.loads(result.stdout)
 
-
-# ---------------------------------------------------------------------------
-# hosts/drives.nix
-# ---------------------------------------------------------------------------
-
-
 def drives_file():
     return os.path.join(SETTINGS["flakeDir"], "hosts", "drives.nix")
-
 
 def read_drives():
     path = drives_file()
@@ -172,10 +135,8 @@ def read_drives():
         raise Problem(f"hosts/drives.nix has a mistake in it, so it was left alone:\n\n{result.stderr.strip()[-600:]}")
     return json.loads(result.stdout)
 
-
 def nix_string(text):
     return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"').replace("${", "\\${") + '"'
-
 
 def render(drives):
     lines = [HEADER + "{"]
@@ -188,10 +149,11 @@ def render(drives):
             lines.append(f"    label = {nix_string(d['label'])};")
         if d.get("options"):
             lines.append("    options = [ " + " ".join(nix_string(o) for o in d["options"]) + " ];")
+        if d.get("apps"):
+            lines.append("    apps = true;")
         lines.append("  };")
     lines.append("}")
     return "\n".join(lines) + "\n"
-
 
 def write_drives(drives):
     path = drives_file()
@@ -207,19 +169,12 @@ def write_drives(drives):
         subprocess.run([SETTINGS["git"], "-C", root, "add", "--intent-to-add", "--force", "--", path],
                        capture_output=True)
 
-
-# ---------------------------------------------------------------------------
-# The folder
-# ---------------------------------------------------------------------------
-
-
 def default_folder(label, device, taken):
     base = re.sub(r"[^A-Za-z0-9._-]+", "-", label or "").strip("-.").lower() or device.get("name", "drive")
     folder, n = f"/mnt/{base}", 2
     while folder in taken:
         folder, n = f"/mnt/{base}-{n}", n + 1
     return folder
-
 
 def check_folder(text, taken, user):
     """-> the folder, cleaned up. Problem with the reason if it cannot be used."""
@@ -251,17 +206,10 @@ def check_folder(text, taken, user):
             raise Problem(f"{folder} already exists and cannot be looked into. Pick another folder.")
     return folder
 
-
-# ---------------------------------------------------------------------------
-# The actions
-# ---------------------------------------------------------------------------
-
-
 def offer_rebuild(what):
     if ask(f"{what}\n\nIt takes effect after a rebuild. Rebuild now?", ok="Rebuild", cancel="Later"):
         os.execv(SETTINGS["rebuild"], [SETTINGS["rebuild"]])
     info("Saved. It takes effect the next time you choose Rebuild in Nix Actions.")
-
 
 def add(drives):
     fstab_devices, fstab_folders = fstab_entries()
@@ -307,8 +255,38 @@ def add(drives):
     entry = {"uuid": uuid, "fsType": device["fstype"]}
     if label:
         entry["label"] = label
+    if device["fstype"] in APP_FILESYSTEMS:
+        entry["apps"] = ask(f"Install apps on {label or 'this drive'} too?\n\n"
+                            "Big apps and games from the app store can then go onto this drive "
+                            "instead of the main one.", ok="Yes, for apps too", cancel="No, just files")
     write_drives({**drives, folder: entry})
     offer_rebuild(f"{label or 'The drive'} was added at {folder}.")
+
+
+def toggle_apps(drives):
+    usable = {f: d for f, d in drives.items() if d.get("fsType") in APP_FILESYSTEMS}
+    if not usable:
+        info("Apps can only go on a drive formatted for Linux (ext4, btrfs, xfs). "
+             "Drives formatted for Windows (NTFS, exFAT) cannot hold them.")
+        return
+    rows = [[folder, folder, d.get("label") or "(no name)", "Yes" if d.get("apps") else "No"]
+            for folder, d in sorted(usable.items())]
+    folder = choose("Which drive?", ["Folder", "Name", "Apps on it"], rows, ok="Change")
+    if not folder:
+        return
+    entry = dict(usable[folder])
+    if entry.get("apps"):
+        if not ask(f"Stop installing apps on {folder}?\n\nApps already on it disappear from the app menu "
+                   "until it is used for apps again. Move them to another drive first with "
+                   "App install locations.", ok="Stop", cancel="Cancel"):
+            return
+        entry["apps"] = False
+        done = f"{folder} is no longer used for apps."
+    else:
+        entry["apps"] = True
+        done = f"Apps can be installed on {folder}."
+    write_drives({**drives, folder: entry})
+    offer_rebuild(done)
 
 
 def remove(drives):
@@ -323,7 +301,6 @@ def remove(drives):
     write_drives(rest)
     offer_rebuild(f"{folder} was removed.")
 
-
 def main():
     try:
         if not os.path.isfile(os.path.join(SETTINGS["flakeDir"], "flake.nix")):
@@ -331,9 +308,12 @@ def main():
         drives = read_drives()
         if drives:
             choice = choose("What would you like to do?", ["Action"],
-                            [["add", "Add a drive"], ["remove", "Remove a drive"]], ok="Go")
+                            [["add", "Add a drive"], ["apps", "Install apps on a drive, or stop"],
+                             ["remove", "Remove a drive"]], ok="Go")
             if choice == "add":
                 add(drives)
+            elif choice == "apps":
+                toggle_apps(drives)
             elif choice == "remove":
                 remove(drives)
         else:
@@ -342,7 +322,6 @@ def main():
         error(str(e))
         return 1
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -12,11 +12,6 @@ online) to this NixOS configuration, without writing any Nix by hand.
     nixos-flakes update            fetch newer versions of all added flakes
     nixos-flakes caches            print the authors' download servers (Nix Actions hands
                                    them to the rebuild, so they work the very first time)
-
-A flake is one small file in hosts/flakes/ (see modules/flakes/_template.nix).
-Nix needs every flake link written down as an "input", so the links are also
-collected in hosts/flakes/registry/flake.nix, which this command writes. See
-modules/flakes/default.nix for how the pieces fit together.
 """
 
 from __future__ import annotations
@@ -38,13 +33,8 @@ import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# The module (modules/flakes/default.nix) fills these in. Run straight from
-# the source folder they are left alone, and the programs come from PATH.
-
-
 def _tool(filled_in: str, env_name: str, fallback: str) -> str:
     return os.environ.get(env_name) or (fallback if filled_in.startswith("@") else filled_in)
-
 
 NIX = _tool("@nix@", "NIXOS_FLAKES_NIX", "nix")
 GIT = _tool("@git@", "NIXOS_FLAKES_GIT", "git")
@@ -54,15 +44,8 @@ REBUILD_COMMAND = shlex.split(os.environ.get("NIXOS_FLAKES_REBUILD", "nix-action
 
 RESERVED_NAMES = {"enable", "package", "nixpkgs", "self"}
 
-
 class Problem(Exception):
     """Something went wrong that the person can understand and act on."""
-
-
-# ---------------------------------------------------------------------------
-# Running programs
-# ---------------------------------------------------------------------------
-
 
 def _env() -> dict[str, str]:
     env = os.environ.copy()
@@ -72,7 +55,6 @@ def _env() -> dict[str, str]:
         env["PATH"] = git_dir + os.pathsep + env.get("PATH", "")
     return env
 
-
 def run(cmd: list[str], *, cwd: Path | None = None, stream: bool = False):
     """Run a program. With stream=True its output goes straight to the screen."""
     try:
@@ -81,7 +63,6 @@ def run(cmd: list[str], *, cwd: Path | None = None, stream: bool = False):
         return subprocess.run(cmd, cwd=cwd, env=_env(), text=True, capture_output=True)
     except FileNotFoundError as exc:
         raise Problem(f"Could not run {cmd[0]}: {exc.strerror}.") from exc
-
 
 def nix(args: list[str], *, cwd: Path | None = None, stream: bool = False):
     base = [
@@ -94,13 +75,10 @@ def nix(args: list[str], *, cwd: Path | None = None, stream: bool = False):
     ]
     return run(base + args, cwd=cwd, stream=stream)
 
-
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-
 
 def clean(text: str) -> str:
     return ANSI.sub("", text or "")
-
 
 def innermost_error(text: str) -> str:
     """The reason Nix gives at the bottom of its (often nested) error."""
@@ -117,10 +95,9 @@ def innermost_error(text: str) -> str:
     note = ""
     if where:
         body = body[: where.start()]
-        if not where.group(1).startswith("/nix/store/"):  # a file of the person's own
+        if not where.group(1).startswith("/nix/store/"):
             note = f"\n(in {where.group(1)}, line {where.group(2)})"
     return (first.strip() + "\n" + body).strip() + note
-
 
 def nix_error(stderr: str) -> str:
     """Turn a Nix error into something a person can read."""
@@ -148,22 +125,15 @@ def nix_error(stderr: str) -> str:
         return "That folder or file does not exist."
     return innermost_error(text) or "Nix stopped without saying why."
 
-
 def need(result, what: str):
     if result.returncode != 0:
         raise Problem(f"{what}\n\n{nix_error(result.stderr)}")
     return result
 
-
-# ---------------------------------------------------------------------------
-# Links
-# ---------------------------------------------------------------------------
-
 SCHEMES = (
     "github:", "gitlab:", "sourcehut:", "git+https:", "git+http:", "git+ssh:", "git+file:",
     "path:", "tarball+", "file+", "hg+", "mercurial+", "indirect:",
 )
-
 
 def normalize_link(text: str) -> str:
     """Turn whatever was pasted into a flake link Nix understands.
@@ -222,14 +192,12 @@ def normalize_link(text: str) -> str:
         return f"https://{host}/{path}"
 
     if len(parts) >= 2:
-        # Codeberg, a company's own server, ...: any git repository works.
         base = "/".join(parts[:2])
         if parts[1].endswith(".git"):
             base = "/".join([parts[0], parts[1]])
         return f"git+https://{host}/{base}"
 
     raise Problem("That link does not point at a project. Paste the address of the flake's page.")
-
 
 def suggest_name(ref: str) -> str:
     """A good file name for a flake, from its link: zen-browser-flake -> zen-browser."""
@@ -253,10 +221,8 @@ def suggest_name(ref: str) -> str:
         name += "-flake"
     return name
 
-
 def valid_name(name: str) -> bool:
     return bool(re.fullmatch(r"[a-z][a-z0-9-]*", name)) and name not in RESERVED_NAMES
-
 
 def nix_string(value: str) -> str:
     """A Nix string literal."""
@@ -266,18 +232,12 @@ def nix_string(value: str) -> str:
     )
     return f'"{escaped}"'
 
-
-# ---------------------------------------------------------------------------
-# What a flake offers
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class Offer:
     ref: str
     locked: str
     description: str = ""
-    packages: dict[str, str] = field(default_factory=dict)  # name -> description
+    packages: dict[str, str] = field(default_factory=dict)
     overlays: list[str] = field(default_factory=list)
     modules: list[str] = field(default_factory=list)
     cache: dict[str, list[str]] | None = None
@@ -293,12 +253,10 @@ class Offer:
             "cache": self.cache,
         }
 
-
 def host_system() -> str:
     machine = platform.machine().lower()
     arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
     return f"{arch}-linux"
-
 
 PACKAGES_APPLY = """
 ps:
@@ -333,12 +291,10 @@ in {
 }
 """
 
-
 def _extra_eval_args() -> list[str]:
     # For testing only: e.g. --override-input, so inputs that cannot be reached
     # from here can be replaced by local copies.
     return os.environ.get("NIXOS_FLAKES_NIX_ARGS", "").split()
-
 
 def _output_names(ref: str, attr: str, apply: str) -> dict | list:
     result = nix(
@@ -349,7 +305,6 @@ def _output_names(ref: str, attr: str, apply: str) -> dict | list:
     if "does not provide attribute" in clean(result.stderr):
         return {} if apply == PACKAGES_APPLY else []
     raise Problem(f"Could not look inside that flake.\n\n{nix_error(result.stderr)}")
-
 
 def inspect(link: str) -> Offer:
     ref = normalize_link(link)
@@ -371,7 +326,6 @@ def inspect(link: str) -> Offer:
     offer.overlays = sorted(_output_names(locked, "overlays", "builtins.attrNames"))
     offer.modules = sorted(_output_names(locked, "nixosModules", "builtins.attrNames"))
 
-    # The author's download servers, if the flake names any.
     store_path = info.get("path")
     if store_path:
         conf = nix(["eval", "--json", "--impure", "--expr", NIX_CONFIG_EXPR % store_path])
@@ -387,7 +341,6 @@ def inspect(link: str) -> Offer:
                 offer.cache = {"substituters": subs, "keys": keys}
     return offer
 
-
 def default_choice(offer: Offer) -> dict:
     """What to tick by default: the main program, and the download server."""
     names = list(offer.packages)
@@ -399,16 +352,10 @@ def default_choice(offer: Offer) -> dict:
         chosen = []
     return {"packages": chosen, "overlays": [], "modules": [], "cache": offer.cache is not None}
 
-
-# ---------------------------------------------------------------------------
-# The configuration folder
-# ---------------------------------------------------------------------------
-
-
 class Config:
     def __init__(self, root: str | Path, *, stream: bool = False):
         self.root = Path(os.path.abspath(os.path.expanduser(str(root))))
-        self.stream = stream  # show Nix's own progress (terminal) instead of hiding it (window)
+        self.stream = stream
         self.host_dir = self.root / "hosts" / "flakes"
         self.shared_dir = self.root / "modules" / "flakes"
         self.registry_dir = self.host_dir / "registry"
@@ -426,8 +373,6 @@ class Config:
             )
         if not self.lib.is_file():
             raise Problem(f"{self.lib} is missing, so this configuration is incomplete.")
-
-    # ---- the flake files ----------------------------------------------------
 
     def load(self) -> dict:
         """Read and check every flake file. Returns {"specs": {...}, "registry": text}."""
@@ -452,8 +397,6 @@ class Config:
             return False
         return True
 
-    # ---- git ----------------------------------------------------------------
-
     def in_git(self) -> bool:
         probe = run([GIT, "-C", str(self.root), "rev-parse", "--is-inside-work-tree"])
         return probe.returncode == 0 and probe.stdout.strip() == "true"
@@ -471,7 +414,6 @@ class Config:
             run([GIT, "-C", str(self.root), "rm", "--cached", "--quiet", "--ignore-unmatch",
                  "--", str(path)])
 
-
 def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
@@ -484,7 +426,6 @@ def write_atomic(path: Path, text: str) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-
 
 def lock_inputs(lock_file: Path, *, under_flakes: bool) -> set[str] | None:
     """Names of the inputs recorded in a lock file (None if there is no such record)."""
@@ -500,7 +441,6 @@ def lock_inputs(lock_file: Path, *, under_flakes: bool) -> set[str] | None:
         return set(node.get("inputs", {}))
     except (OSError, ValueError, KeyError):
         return None
-
 
 @contextlib.contextmanager
 def undo_on_failure(cfg: Config, *touched: Path):
@@ -527,12 +467,6 @@ def undo_on_failure(cfg: Config, *touched: Path):
                 if path in visible:
                     cfg.track(path)
         raise
-
-
-# ---------------------------------------------------------------------------
-# Keeping the registry and the lock files in line with the flake files
-# ---------------------------------------------------------------------------
-
 
 def sync(cfg: Config) -> bool:
     """Make hosts/flakes/registry (and both lock files) match the flake files.
@@ -566,7 +500,6 @@ def sync(cfg: Config) -> bool:
             changed = True
     return changed
 
-
 def update(cfg: Config) -> None:
     """Fetch newer versions of everything, the added flakes included."""
     sync(cfg)
@@ -577,19 +510,12 @@ def update(cfg: Config) -> None:
         need(nix(["flake", "update"], cwd=cfg.root, stream=cfg.stream),
              "Could not fetch newer versions.")
 
-
-# ---------------------------------------------------------------------------
-# Adding and removing
-# ---------------------------------------------------------------------------
-
-
 def unique_name(cfg: Config, wanted: str, taken: set[str]) -> str:
     name, n = wanted, 2
     while name in taken or cfg.spec_path(name).exists():
         name = f"{wanted}-{n}"
         n += 1
     return name
-
 
 def render_spec(offer: Offer, choice: dict, today: datetime.date | None = None) -> str:
     today = today or datetime.date.today()
@@ -627,7 +553,6 @@ def render_spec(offer: Offer, choice: dict, today: datetime.date | None = None) 
     lines.append("}")
     return "\n".join(lines) + "\n"
 
-
 def add(cfg: Config, link: str, *, name: str | None = None, choice: dict | None = None,
         offer: Offer | None = None) -> str:
     """Add a flake. Returns its name. Nothing is left half done if it fails."""
@@ -664,7 +589,6 @@ def add(cfg: Config, link: str, *, name: str | None = None, choice: dict | None 
         sync(cfg)
     return name
 
-
 def remove(cfg: Config, name: str) -> None:
     """Remove a flake. If it fails, the flake is still there afterwards."""
     specs = cfg.load()["specs"]
@@ -683,20 +607,12 @@ def remove(cfg: Config, name: str) -> None:
         cfg.untrack(path)
         sync(cfg)
 
-
-# ---------------------------------------------------------------------------
-# The window
-# ---------------------------------------------------------------------------
-
-
 def zenity(*args: str):
     return run([ZENITY, *args])
-
 
 def markup(text: str) -> str:
     """Text that is safe inside a zenity message (it reads markup and backslash escapes)."""
     return html.escape(text, quote=False).replace("\\", "\\\\")
-
 
 @contextlib.contextmanager
 def busy(title: str, text: str):
@@ -717,16 +633,13 @@ def busy(title: str, text: str):
         with contextlib.suppress(Exception):
             proc.wait(timeout=5)
 
-
 def show_error(text: str) -> None:
     zenity("--error", "--title=Add a Flake", "--no-markup", "--width=480", f"--text={text}")
-
 
 def rebuild_hint() -> str:
     """How to say "rebuild" to this person: through Nix Actions if it is there."""
     return ("Open Nix Actions and choose Rebuild" if shutil.which("nix-actions")
             else "Rebuild NixOS")
-
 
 def ask_rebuild(name: str, verb: str) -> None:
     command = shutil.which(REBUILD_COMMAND[0]) if REBUILD_COMMAND else None
@@ -744,7 +657,6 @@ def ask_rebuild(name: str, verb: str) -> None:
         zenity("--info", "--title=Add a Flake", "--width=420",
                f"--text=<b>{markup(name)}</b> has been {verb}.\n\n"
                "Rebuild NixOS to make the change take effect.")
-
 
 def pick_things(name: str, offer: Offer) -> dict | None:
     """The tick list. Returns what was chosen, or None if cancelled."""
@@ -803,7 +715,6 @@ def pick_things(name: str, offer: Offer) -> dict | None:
             return chosen
         show_error("Tick at least one program, overlay or module to add.")
 
-
 def gui_add(cfg: Config, link: str) -> bool:
     """One round of 'paste a link, pick what you want, add it'. True if something was added."""
     try:
@@ -821,7 +732,6 @@ def gui_add(cfg: Config, link: str) -> bool:
         return False
     ask_rebuild(name, "added")
     return True
-
 
 def gui_remove(cfg: Config) -> bool:
     """Pick a flake and remove it. True if one was removed."""
@@ -858,7 +768,6 @@ def gui_remove(cfg: Config) -> bool:
     ask_rebuild(name, "removed")
     return True
 
-
 def gui(cfg: Config, link: str | None = None) -> None:
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) \
             and "NIXOS_FLAKES_ZENITY" not in os.environ:
@@ -869,7 +778,7 @@ def gui(cfg: Config, link: str | None = None) -> None:
     except Problem as problem:
         show_error(str(problem))
         return
-    previous = ""  # what was typed last time, so a typo can be fixed instead of retyped
+    previous = ""
     while True:
         if link is None:
             answer = zenity(
@@ -892,12 +801,6 @@ def gui(cfg: Config, link: str | None = None) -> None:
         if gui_add(cfg, attempt):
             return
 
-
-# ---------------------------------------------------------------------------
-# The command line
-# ---------------------------------------------------------------------------
-
-
 def show_offer(offer: Offer) -> None:
     print(f"Link:         {offer.ref}")
     if offer.description:
@@ -907,7 +810,6 @@ def show_offer(offer: Offer) -> None:
     print("NixOS modules:" + " " + (", ".join(offer.modules) or "none"))
     if offer.cache:
         print("Download servers: " + ", ".join(offer.cache["substituters"]))
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
@@ -999,10 +901,8 @@ def main(argv: list[str] | None = None) -> int:
                         + [f"module:{m}" for m in spec["modules"]]
                     print(f"{name:<24} {spec['url']}   [{', '.join(use) or 'settings only'}]")
         elif command == "caches":
-            # One "setting value value ..." line per Nix setting. A flake's download
-            # server is only part of the system's Nix settings after the first
-            # rebuild, so the very first build (of ComfyUI, say) would compile
-            # everything from source. Handing these to that build avoids it.
+            # A flake's cache only reaches nix.conf after the first rebuild; printing it lets
+            # Nix Actions pass it to that rebuild too.
             urls, keys = [], []
             for spec in cfg.load()["specs"].values():
                 for cache in [spec.get("cache")]:
@@ -1023,7 +923,6 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

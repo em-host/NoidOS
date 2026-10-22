@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
-"""Stops the shared configuration from leaving this computer when it carries something private.
-
+"""
     privacy_check.py <what is about to be shared> [<this computer's hosts/ folder>]
 
-Runs before anything is handed out: when the install ISO is built (iso/payload.nix)
-and before Publish changes sends a release online (sync.py). Both carry only the
-shared parts, flake.nix, flake.lock, lib/ and modules/ (shared.py). Everything that
-belongs to one computer or one person lives in hosts/, which is never shared,
-and secrets live outside the folder altogether (modules/common/secrets.nix). This
-looks for what slipped through anyway:
-
-  * addresses of private networks (10.x, 192.168.x, 172.16-31.x) and network
-    shares (//server/share, smb://)  (privacy-check: ok)
-  * share logins (credentials=...), password hashes, private keys,  (privacy-check: ok)
-    passwords written into a setting (password = "...")  (privacy-check: ok)
-  * anything taken from this computer's own hosts/ files: its IP addresses,
-    share addresses, home folder and disk IDs
-
-A line that is fine after all (an example in a comment, say) can carry the
-words "privacy-check: ok".
+Lines containing "privacy-check: ok" are skipped.
 """
 import os
 import re

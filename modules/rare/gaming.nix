@@ -1,15 +1,11 @@
 { mod, pkgs, config, lib, ... }:
 
 mod.mkModule config lib "gaming" "Gaming Suite (Steam, Gamemode, Nero)" {
-
   programs.steam = {
     enable = true;
     extraPackages = with pkgs; [
       steamtinkerlaunch
     ];
-    # Extra choices under Properties -> Compatibility in Steam. GE-Proton fixes
-    # many games that plain Proton does not run, and comes with the system, so
-    # nothing has to be downloaded by hand.
     extraCompatPackages = with pkgs; [
       steamtinkerlaunch
       proton-ge-bin
@@ -40,6 +36,4 @@ mod.mkModule config lib "gaming" "Gaming Suite (Steam, Gamemode, Nero)" {
     prismlauncher
   ];
 
-  # (Steam finds Proton versions installed with ProtonUp-Qt in
-  # ~/.steam/root/compatibilitytools.d by itself.)
 }

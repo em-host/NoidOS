@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""What "AI Chat" and "ComfyUI" in the app menu run.
-
+"""
     ai-launcher chat         start the AI, fetch its model the first time, open the chat
-    ai-launcher chat-stop    stop it again (frees the memory and the graphics card)
+    ai-launcher chat-stop    stop it again
     ai-launcher media        start ComfyUI and open it
     ai-launcher media-stop   stop ComfyUI
     ai-launcher which-model  print the model this computer gets, and why
-
-The @...@ gaps are filled in by ../ai.nix.
 """
 import glob
 import json
@@ -28,19 +25,11 @@ SETTINGS = json.loads(r"""@settings@""")
 
 TITLE = {"chat": "AI Chat", "media": "ComfyUI"}
 
-
 class Problem(Exception):
     pass
 
-
 class Cancelled(Exception):
     pass
-
-
-# ---------------------------------------------------------------------------
-# A progress window
-# ---------------------------------------------------------------------------
-
 
 class Progress:
     def __init__(self, title, text, pulsate=True):
@@ -69,15 +58,8 @@ class Progress:
             self.proc.terminate()
             self.proc.wait()
 
-
 def show_error(title, text):
     subprocess.run([ZENITY, "--error", "--no-markup", "--width=480", f"--title={title}", f"--text={text}"])
-
-
-# ---------------------------------------------------------------------------
-# Talking to the services
-# ---------------------------------------------------------------------------
-
 
 def http(url, body=None, method=None, timeout=10):
     data = json.dumps(body).encode() if body is not None else None
@@ -89,7 +71,6 @@ def http(url, body=None, method=None, timeout=10):
         raw = response.read()
     return json.loads(raw) if raw.strip() else {}
 
-
 def answers(url):
     try:
         urllib.request.urlopen(url, timeout=3).close()
@@ -97,12 +78,10 @@ def answers(url):
     except (urllib.error.URLError, OSError):
         return False
 
-
 def systemctl(*args):
     result = subprocess.run([SYSTEMCTL, *args], capture_output=True, text=True)
     if result.returncode != 0:
         raise Problem((result.stderr or result.stdout).strip() or f"systemctl {' '.join(args)} failed")
-
 
 def wait_for(url, seconds, progress, text, unit=None, user=False):
     progress.say(text)
@@ -116,15 +95,9 @@ def wait_for(url, seconds, progress, text, unit=None, user=False):
             )
             if state.returncode == 0:
                 raise Problem(f"{unit} stopped with an error. Details: journalctl {'--user ' if user else ''}-u {unit}")
-        progress.say(text)  # also notices a closed window
+        progress.say(text)
         time.sleep(1)
     raise Problem(f"It did not start within {seconds // 60} minutes.")
-
-
-# ---------------------------------------------------------------------------
-# Which model fits this computer
-# ---------------------------------------------------------------------------
-
 
 def gpu_memory_gib():
     """The memory of the biggest graphics card, in GiB (0 when there is none)."""
@@ -148,14 +121,12 @@ def gpu_memory_gib():
         best = 8.0  # Intel does not say; Arc cards have 6 to 16 GB
     return best
 
-
 def ram_gib():
     with open("/proc/meminfo") as f:
         for line in f:
             if line.startswith("MemTotal:"):
                 return int(line.split()[1]) / 1024**2
     return 0.0
-
 
 def pick_model():
     """-> (model name, why)"""
@@ -169,28 +140,18 @@ def pick_model():
             return size["model"], f"no big enough graphics card ({vram:.1f} GiB), RAM {ram:.1f} GiB"
     raise Problem("No model size fits this computer.")
 
-
-# ---------------------------------------------------------------------------
-# Getting the model
-# ---------------------------------------------------------------------------
-# The chat page always opens with the model called SETTINGS["alias"] ("assistant").
-# The model picked for this computer is downloaded once and renamed to that, so
-# the chat's list shows one model and the default never has to change.
-
+# The chosen model is copied to SETTINGS["alias"], the chat's fixed default model.
 
 def marker_path():
     state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(state, "noid-ai", "model")
 
-
 def installed():
     tags = http(SETTINGS["ollamaUrl"] + "/api/tags")
     return {m.get("name") for m in tags.get("models", [])} | {m.get("model") for m in tags.get("models", [])}
 
-
 def alias_tag():
     return SETTINGS["alias"] + ":latest"
-
 
 def have_model(name):
     try:
@@ -199,7 +160,6 @@ def have_model(name):
     except OSError:
         recorded = None
     return recorded == name and alias_tag() in installed()
-
 
 def download(name, progress):
     request = urllib.request.Request(
@@ -225,7 +185,6 @@ def download(name, progress):
     except urllib.error.URLError as e:
         raise Problem(f"The model could not be downloaded. Check the internet connection. ({e.reason})")
 
-
 def make_default(name):
     """Rename the downloaded model to the alias (the old one's space is freed)."""
     if alias_tag() in installed():
@@ -236,14 +195,37 @@ def make_default(name):
     with open(marker_path(), "w") as f:
         f.write(name + "\n")
 
+def running(unit, user=False):
+    return subprocess.run([SYSTEMCTL, *(["--user"] if user else []), "is-active", "--quiet", unit]).returncode == 0
 
-# ---------------------------------------------------------------------------
-# The actions
-# ---------------------------------------------------------------------------
+
+def open_or_stop(title, what):
+    """Asked when the app is clicked while it is already running. -> "open", "stop" or None."""
+    stop = f"Stop {what}"
+    result = subprocess.run(
+        [ZENITY, "--question", "--no-markup", "--width=420", f"--title={title}",
+         f"--text={title} is running.\n\nOpen it, or stop it to free the memory and graphics card again?",
+         "--ok-label=Open", "--cancel-label=Cancel", f"--extra-button={stop}"],
+        capture_output=True, text=True)
+    if result.returncode == 0:
+        return "open"
+    return "stop" if result.stdout.strip() == stop else None
+
+
+def stopped(title):
+    subprocess.Popen([ZENITY, "--notification", f"--text={title} stopped. Its memory is free again."],
+                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def chat():
     title = TITLE["chat"]
+    if running("open-webui.service"):
+        choice = open_or_stop(title, "the AI")
+        if choice == "stop":
+            systemctl("stop", *SETTINGS["stopUnits"])
+            stopped(title)
+        if choice != "open":
+            return
     progress = Progress(title, "Starting the AI...")
     try:
         systemctl("start", *SETTINGS["startUnits"])
@@ -262,9 +244,15 @@ def chat():
         progress.close()
     subprocess.Popen([XDG_OPEN, SETTINGS["webuiUrl"]], start_new_session=True)
 
-
 def media():
     title = TITLE["media"]
+    if running("comfyui.service", user=True):
+        choice = open_or_stop(title, "ComfyUI")
+        if choice == "stop":
+            systemctl("--user", "stop", "comfyui.service")
+            stopped(title)
+        if choice != "open":
+            return
     progress = Progress(title, "Starting ComfyUI...")
     try:
         systemctl("--user", "start", "comfyui.service")
@@ -274,7 +262,6 @@ def media():
     finally:
         progress.close()
     subprocess.Popen([XDG_OPEN, SETTINGS["comfyUrl"]], start_new_session=True)
-
 
 def main(argv):
     action = argv[1] if len(argv) > 1 else "chat"
@@ -302,7 +289,6 @@ def main(argv):
         print(e, file=sys.stderr)
         return 1
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

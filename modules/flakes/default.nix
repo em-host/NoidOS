@@ -1,35 +1,5 @@
 { mod, config, lib, pkgs, inputs, ... }@args:
 
-# ---------------------------------------------------------------------------
-# Flakes: add programs and settings that someone publishes as a "flake".
-#
-# EASIEST   Open "Nix Actions" in the app menu and choose "Add a Flake", paste
-#           the link, tick what you want. It writes the file below for you.
-#
-# BY HAND   Copy _template.nix into hosts/flakes/, name the copy after the
-#           flake (zen-browser.nix), fill in the link and what to take from it,
-#           then open Nix Actions and choose Rebuild. A flake file is only a
-#           few settings:
-#
-#             { url = "github:0xc000022070/zen-browser-flake";
-#               packages = [ "default" ]; }
-#
-# Every flake file puts a switch at module.flakes.<name>.enable (on by default:
-# adding the file is the decision). Flake files can live in
-#
-#   hosts/flakes/    this computer only (what the app uses)
-#   modules/flakes/  shared with everyone who has this configuration
-#
-# HOW IT WORKS
-#   flake.nix never changes. Nix needs every flake link to be written down as
-#   an "input", so the links are collected in a small generated flake
-#   (hosts/flakes/registry/flake.nix) that flake.nix points at. The
-#   nixos-flakes command rewrites it from the flake files whenever they change
-#   (Nix Actions runs it before every rebuild), and Nix pins the versions as usual.
-#   Anything else in these folders that is an ordinary NixOS module is
-#   imported as one. The shared logic is in lib/flakes.nix.
-# ---------------------------------------------------------------------------
-
 let
   cfg = config.module.flakes;
   flakeLib = mod.flakes;
@@ -39,7 +9,6 @@ let
 
   system = pkgs.stdenv.hostPlatform.system;
 
-  # ---- what each flake offers ---------------------------------------------
   registry = inputs.flakes or (throw ''
     flake.nix has no "flakes" input.
     It needs:  flakes.url = "path:./hosts/flakes/registry";
@@ -50,7 +19,6 @@ let
       The flake "${name}" has not been registered yet.
       Open Nix Actions and choose Rebuild (or run "nixos-flakes sync") and try again.'');
 
-  # Look names up in what a flake offers. If one is wrong, say what is there.
   pick = name: spec: what: offered: wanted:
     map
       (n:
@@ -70,7 +38,6 @@ let
   modulesOf = name: spec:
     pick name spec "NixOS module" ((flakeOf name).nixosModules or { }) spec.modules;
 
-  # ---- the command and the launcher ----------------------------------------
   escape = lib.escape [ "\\" "\"" ];
 
   nixosFlakes = pkgs.writeScriptBin "nixos-flakes" (
@@ -86,8 +53,6 @@ let
       (builtins.readFile ./nixos-flakes.py)
   );
 
-  # "Add a Flake" is a choice in the Nix Actions menu. It only gets an app menu
-  # entry of its own when that menu is not there.
   ownLauncher = !(config.module.nix-actions.enable or false);
 
   launcher = pkgs.makeDesktopItem {

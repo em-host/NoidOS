@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""A read-only view of the NixOS configuration folder, for the AI chat.
-
-Open WebUI reads /openapi.json from here and offers the three operations below
-to the model as tools. Nothing here can change a file: there is no operation
-that writes, and ../ai.nix runs this sandboxed with only the configuration
-folder visible, read-only.
-
-    config-reader.py --root /home/me/NixOS --port 8099
-"""
+"""Read-only OpenAPI tool server over the configuration folder, for Open WebUI."""
 import argparse
 import json
 import os
@@ -15,7 +7,6 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-# Folders that are never shown: version control, build results, caches.
 SKIP_DIRS = {".git", "result", "__pycache__", ".direnv"}
 MAX_FILE_BYTES = 1024 * 1024  # bigger files are not text configuration
 MAX_LIST = 1000
@@ -24,10 +15,8 @@ MAX_MATCHES = 200
 
 ROOT = ""
 
-
 class Problem(Exception):
     pass
-
 
 def resolve(relative):
     """A path inside the folder, from what the model asked for. Never outside it."""
@@ -37,11 +26,9 @@ def resolve(relative):
         raise Problem("That is outside the configuration folder.")
     return full
 
-
 def shown(full):
     rel = os.path.relpath(full, ROOT)
     return "" if rel == "." else rel
-
 
 def is_text(full):
     try:
@@ -52,13 +39,11 @@ def is_text(full):
     except OSError:
         return False
 
-
 def walk(start):
     for dirpath, dirnames, filenames in os.walk(start):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
             yield os.path.join(dirpath, name)
-
 
 def list_files(folder=""):
     start = resolve(folder)
@@ -74,7 +59,6 @@ def list_files(folder=""):
         if len(files) >= MAX_LIST:
             break
     return {"folder": shown(start) or ".", "files": files, "truncated": len(files) >= MAX_LIST}
-
 
 def read_file(path, start_line=1, max_lines=MAX_LINES):
     full = resolve(path)
@@ -98,7 +82,6 @@ def read_file(path, start_line=1, max_lines=MAX_LINES):
         "content": numbered,
     }
 
-
 def search_files(text, folder=""):
     if not text:
         raise Problem("Give some text to search for.")
@@ -119,13 +102,11 @@ def search_files(text, folder=""):
             continue
     return {"text": text, "matches": matches, "truncated": False}
 
-
 def query(name, description, kind="string", required=False, default=None):
     schema = {"type": kind, "description": description}
     if default is not None:
         schema["default"] = default
     return {"name": name, "in": "query", "required": required, "description": description, "schema": schema}
-
 
 SPEC = {
     "openapi": "3.1.0",
@@ -171,7 +152,6 @@ SPEC = {
 
 OPERATIONS = {"/list_files": list_files, "/read_file": read_file, "/search_files": search_files}
 
-
 class Handler(BaseHTTPRequestHandler):
     def reply(self, status, body):
         data = json.dumps(body).encode("utf-8")
@@ -196,9 +176,8 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError) as e:
             return self.reply(400, {"error": f"Wrong parameters: {e}"})
 
-    def log_message(self, fmt, *args):  # one short line per request in the journal
+    def log_message(self, fmt, *args):
         sys.stderr.write("%s\n" % (fmt % args))
-
 
 def main():
     global ROOT
@@ -211,7 +190,6 @@ def main():
     if not os.path.isdir(ROOT):
         print(f"The configuration folder {ROOT} is not there.", file=sys.stderr)
     ThreadingHTTPServer((opts.host, opts.port), Handler).serve_forever()
-
 
 if __name__ == "__main__":
     main()

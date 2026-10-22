@@ -1,27 +1,5 @@
 { mod, config, lib, pkgs, utils, ... }:
 
-# ---------------------------------------------------------------------------
-# Drives: more disks, opened at a fixed folder every time the computer starts.
-#
-# EASIEST  Nix Actions -> Drives. It lists the drives this computer does not use
-#          yet, asks for a folder (e.g. /mnt/games), writes hosts/drives.nix and
-#          rebuilds. The same place removes one again.
-#
-# BY HAND  hosts/drives.nix (or myOS.drives in hosts/users/user.nix):
-#
-#            { "/mnt/games" = { uuid = "1234-ABCD..."; fsType = "ext4"; label = "Games"; }; }
-#
-#          The UUID and type are shown by  lsblk -f
-#
-# A drive that is missing (unplugged, broken) does not stop the computer from
-# starting; it is simply not there. Linux drives (ext4, btrfs, xfs, f2fs) are
-# given to you the first time, so you can write to them without sudo; Windows and
-# USB-stick drives (NTFS, exFAT, FAT) open as yours anyway.
-#
-# Not hardware-configuration.nix on purpose: that file comes from the hardware
-# scan, and scanning again would also write down whatever happened to be plugged
-# in at the time.
-# ---------------------------------------------------------------------------
 let
   cfg = config.myOS.drives;
   file = ../../hosts/drives.nix;
@@ -34,14 +12,12 @@ let
 
   linuxTypes = [ "ext4" "ext3" "ext2" "btrfs" "xfs" "f2fs" ];
 
-  # Windows' and USB sticks' file systems have no owners of their own: say who
-  # owns everything on them.
   windowsOptions = [ "uid=${uid}" "gid=${gid}" "umask=022" ];
 
   mountOptions = d:
     [
-      "nofail" # missing drive: start anyway
-      "x-systemd.device-timeout=10s" # and do not wait long for it
+      "nofail"
+      "x-systemd.device-timeout=10s"
     ]
     ++ lib.optionals (lib.elem d.fsType [ "ntfs" "ntfs3" "exfat" "vfat" ]) windowsOptions
     ++ d.options;
@@ -71,6 +47,11 @@ let
         default = [ ];
         description = "Extra mount options.";
       };
+      apps = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Flatpak apps can be installed on this drive (Linux file systems only).";
+      };
     };
   };
 in
@@ -93,8 +74,7 @@ in
       options = mountOptions d;
     }) cfg;
 
-    # A new Linux drive's top folder belongs to root. Hand it over once; a folder
-    # that already belongs to someone is left alone.
+    # Hand a root-owned top folder of a Linux file system to the user, once.
     systemd.services = lib.mapAttrs' (folder: _:
       let mountUnit = "${utils.escapeSystemdPath folder}.mount";
       in lib.nameValuePair "drive-owner-${utils.escapeSystemdPath folder}" {

@@ -1,39 +1,5 @@
 { mod, config, lib, pkgs, inputs, ... }:
 
-# ---------------------------------------------------------------------------
-# App store: one place for Flatpak apps and AppImage apps.
-#
-# FLATPAK
-#   * Flathub is set up, and the desktop's own store (KDE Discover, GNOME
-#     Software or COSMIC Store) is the place to search, install, update and
-#     remove apps.
-#   * Double-clicking a .flatpak, .flatpakref or .flatpakrepo file opens that
-#     store, ready to install it.
-#   * Apps listed in `module.app-store.flatpak.apps` are installed for you and
-#     kept up to date. Apps installed by hand from the store are left alone.
-#
-# APPIMAGE
-#   * Double-click an .AppImage and it asks: "Add to app menu" (moves it into
-#     ~/Applications and opens it) or "Just run it". Added apps appear in the
-#     app menu with their own name and icon; right-click one and choose
-#     "Remove this app" to delete it. Dropping files into ~/Applications by
-#     hand works too, and so does deleting them.
-#   * AppImages can also be listed in `module.app-store.appimage.apps`, which
-#     installs them for everybody and pins them by hash.
-#
-# All of it is on by default. Examples (hosts/users/user.nix):
-#
-#   module.app-store = {
-#     flatpak.apps = [ "org.mozilla.firefox" "com.github.tchx84.Flatseal" ];
-#     appimage.apps.my-app = {
-#       url = "https://example.com/My-App-1.0-x86_64.AppImage";
-#       hash = lib.fakeHash; # rebuild once, then paste the hash Nix reports
-#     };
-#   };
-#
-# Everything the module needs lives in ./app-store/.
-# ---------------------------------------------------------------------------
-
 let
   cfg = config.module.app-store;
   fp = cfg.flatpak;
@@ -41,12 +7,10 @@ let
 
   assets = ./app-store;
 
-  # ---- AppImage: the program that runs them ------------------------------
   appimageRun = pkgs.appimage-run.override {
     extraPkgs = _: ai.extraLibraries;
   };
 
-  # ---- AppImage: apps installed declaratively ----------------------------
   mkAppImage = name: app:
     let
       src = pkgs.fetchurl {
@@ -98,7 +62,6 @@ let
     };
   };
 
-  # ---- AppImage: menu entries for AppImages dropped into ~/Applications ---
   integrate = pkgs.writeShellScriptBin "appimage-integrate" (
     builtins.replaceStrings
       [ "@path@" "@folder@" ]
@@ -109,9 +72,9 @@ let
           gawk
           gnugrep
           gnused
-          binutils # readelf
-          squashfs-tools # unsquashfs
-          libarchive # bsdtar
+          binutils
+          squashfs-tools
+          libarchive
           inotify-tools
           desktop-file-utils
           xdg-utils
@@ -121,10 +84,6 @@ let
       (builtins.readFile (assets + "/appimage-integrate.sh"))
   );
 
-  # ---- AppImage: what runs when an AppImage is opened --------------------
-  # Wraps appimage-run: a double-clicked AppImage gets the "Add to app menu?"
-  # question first; everything else (terminal, scripts, menu entries) runs
-  # straight away.
   appimageOpen = pkgs.writeShellScriptBin "appimage-open" (
     builtins.replaceStrings
       [ "@path@" "@folder@" "@appimageRun@" "@integrate@" "@ask@" ]
@@ -150,8 +109,7 @@ let
     categories = [ "PackageManager" "Utility" ];
   };
 
-  # The store that opens Flatpak files, by file type. COSMIC Store only opens
-  # .flatpakref files (the kind Flathub's "Install" button hands out).
+  # COSMIC Store only handles .flatpakref.
   flatpakMimeTypes = [
     "application/vnd.flatpak"
     "application/vnd.flatpak.ref"
@@ -163,6 +121,23 @@ let
     else if config.myOS.DE == "cosmic" then { "application/vnd.flatpak.ref" = "com.system76.CosmicStore.desktop"; }
     else { };
 
+  flatpak = "${config.services.flatpak.package or pkgs.flatpak}/bin/flatpak";
+
+  linuxTypes = [ "ext4" "ext3" "ext2" "btrfs" "xfs" "f2fs" ];
+  slug = text: lib.concatMapStrings (c: if builtins.match "[a-z0-9]" c != null then c else "-")
+    (lib.stringToCharacters (lib.toLower (lib.removePrefix "/" text)));
+
+  driveLocations = lib.mapAttrs'
+    (folder: d: lib.nameValuePair (slug folder) {
+      path = "${folder}/flatpak";
+      name = if d.label != null then d.label else "Drive at ${folder}";
+      mountPoint = folder;
+    })
+    (lib.filterAttrs (_: d: d.apps && lib.elem d.fsType linuxTypes) (config.myOS.drives or { }));
+
+  locations = lib.optionalAttrs fp.driveLocations driveLocations
+    // lib.mapAttrs (_: l: l // { mountPoint = null; }) fp.locations;
+
   folderLauncher = pkgs.makeDesktopItem {
     name = "appimage-folder";
     desktopName = "AppImages Folder";
@@ -173,8 +148,6 @@ let
   };
 in
 {
-  # nix-flatpak provides the declarative Flatpak options. Importing it here
-  # keeps flake.nix free of module imports.
   imports = [ inputs.nix-flatpak.nixosModules.nix-flatpak ];
 
   options.module.app-store = {
@@ -222,6 +195,42 @@ in
         type = lib.types.str;
         default = "weekly";
         description = "How often to update (a systemd calendar expression, e.g. \"daily\").";
+      };
+
+      driveLocations = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Drives marked for apps (myOS.drives.<folder>.apps, asked by Nix Actions ->
+          Drives) become places to install Flatpak apps: the store offers each as
+          another source, and Nix Actions -> App install locations moves apps there.
+        '';
+      };
+
+      locations = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            path = lib.mkOption {
+              type = lib.types.strMatching "/[^[:space:]]+";
+              description = "Folder the apps are installed into.";
+            };
+            name = lib.mkOption {
+              type = lib.types.str;
+              description = "Name shown in the store and in App install locations.";
+            };
+          };
+        });
+        default = { };
+        example = { games = { path = "/data/flatpak"; name = "Games"; }; };
+        description = "Further Flatpak install locations, by id.";
+      };
+
+      locationsManifest = lib.mkOption {
+        type = lib.types.attrs;
+        internal = true;
+        readOnly = true;
+        default = if cfg.enable && fp.enable then locations else { };
+        description = "The install locations, for Nix Actions -> App install locations.";
       };
 
       removeUnlisted = lib.mkOption {
@@ -284,10 +293,6 @@ in
   };
 
   config = lib.mkIf cfg.enable (lib.mkMerge [
-
-    # -----------------------------------------------------------------------
-    # Flatpak
-    # -----------------------------------------------------------------------
     (lib.mkIf fp.enable {
       services.flatpak = {
         enable = true;
@@ -299,27 +304,72 @@ in
         uninstallUnmanaged = fp.removeUnlisted;
       };
 
-      # Flatpak needs the desktop portals. The desktop modules turn them on
-      # already; this covers anything that doesn't.
       xdg.portal.enable = lib.mkDefault true;
 
-      # Double-clicking a .flatpak / .flatpakref / .flatpakrepo file opens the store.
       xdg.mime.defaultApplications = flatpakFileHandlers;
-
-      # The store itself comes with the desktop: KDE Discover (plus the
-      # Flatpak permissions page in System Settings), GNOME Software and
-      # COSMIC Store are installed automatically once Flatpak is on.
     })
 
-    # -----------------------------------------------------------------------
-    # AppImage
-    # -----------------------------------------------------------------------
+    (lib.mkIf (fp.enable && locations != { }) {
+      environment.etc = lib.mapAttrs' (id: l: lib.nameValuePair "flatpak/installations.d/${id}.conf" {
+        text = ''
+          [Installation "${id}"]
+          Path=${l.path}
+          DisplayName=${l.name}
+          StorageType=harddisk
+        '';
+      }) locations;
+
+      # NixOS only adds the default installations' exports to XDG_DATA_DIRS.
+      environment.profiles = lib.mkAfter (lib.mapAttrsToList (_: l: "${l.path}/exports") locations);
+
+      systemd.services = lib.mapAttrs' (id: l: lib.nameValuePair "flatpak-location-${id}" {
+        description = "Flatpak install location ${l.name}";
+        wantedBy = [ "multi-user.target" ];
+        wants = [ "network-online.target" ];
+        after = [ "network-online.target" ];
+        # Never create the folder on the main drive while the drive is missing.
+        unitConfig = { RequiresMountsFor = [ l.path ]; }
+          // lib.optionalAttrs (l.mountPoint != null) { ConditionPathIsMountPoint = l.mountPoint; };
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          Restart = "on-failure";
+          RestartSec = 60;
+        };
+        script = ''
+          install -d -m 755 ${lib.escapeShellArg l.path}
+        '' + lib.concatMapStrings (r: ''
+          ${flatpak} remote-add --installation=${id} --if-not-exists ${lib.optionalString (r.args or null != null) r.args} \
+            ${lib.optionalString (r.gpg-import or null != null) "--gpg-import=${r.gpg-import}"} ${lib.escapeShellArg r.name} ${lib.escapeShellArg r.location}
+        '') config.services.flatpak.remotes;
+      }) locations
+      // lib.optionalAttrs fp.autoUpdate {
+        flatpak-locations-update = {
+          description = "Update Flatpak apps on other drives";
+          wants = [ "network-online.target" ];
+          after = [ "network-online.target" ];
+          serviceConfig.Type = "oneshot";
+          script = lib.concatStrings (lib.mapAttrsToList (id: l: ''
+            if [ -d ${lib.escapeShellArg "${l.path}/repo"} ]; then
+              ${flatpak} update --installation=${id} --noninteractive -y || true
+            fi
+          '') locations);
+        };
+      };
+
+      systemd.timers.flatpak-locations-update = lib.mkIf fp.autoUpdate {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = fp.updateSchedule;
+          Persistent = true;
+        };
+      };
+    })
+
     (lib.mkIf ai.enable {
-      # Run AppImages directly: double-click, or ./Some.AppImage in a terminal.
       programs.appimage = {
         enable = true;
         binfmt = true;
-        # With the prompt on, the opener sits in front of appimage-run.
         package = if ai.integrate then appimageOpen else appimageRun;
       };
 

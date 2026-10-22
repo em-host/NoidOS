@@ -4,21 +4,16 @@ let
   cfg = config.module.zen;
   system = pkgs.stdenv.hostPlatform.system;
 
-  # Fetch Zen Browser from the flake and inject strict privacy policies
   hardened-zen = inputs.zen-browser.packages.${system}.default.override {
-
-    # FIXED: The low-level wrapper requires 'extraPolicies', not 'policies'
+    # The wrapper takes extraPolicies, not policies.
     extraPolicies = {
-
-      # === 1. BRAVE PARITY: CORE PRIVACY & TELEMETRY ===
       DisableTelemetry = true;
       DisableFirefoxStudies = true;
       DisablePocket = true;
-      DisableProfileImport = true; # Prevent grabbing data from your other browsers
-      OfferToSaveLogins = false; # Encourage use of a real password manager
+      DisableProfileImport = true;
+      OfferToSaveLogins = false;
       PasswordManagerEnabled = false;
 
-      # === 2. BRAVE PARITY: SHIELDS (Anti-Tracking & Fingerprinting) ===
       EnableTrackingProtection = {
         Value = true;
         Locked = true;
@@ -26,33 +21,25 @@ let
         Fingerprinting = true;
       };
 
-      # Lock down strict under-the-hood preferences
       Preferences = {
-        # Block 3rd party cookies completely (Brave default)
+        # 5: Total Cookie Protection
         "network.cookie.cookieBehavior" = 5;
 
-        # HTTPS-Only Mode (Brave's HTTPS Everywhere)
         "dom.security.https_only_mode" = true;
         "dom.security.https_only_mode_ever_enabled" = true;
 
-        # Disable hyperlink auditing (Pings tracking your clicks)
         "browser.send_pings" = false;
 
-        # Enable Global Privacy Control (GPC) & Do Not Track
         "privacy.globalprivacycontrol.enabled" = true;
         "privacy.donottrackheader.enabled" = true;
 
-        # Disable DNS prefetching and speculative connections
         "network.dns.disablePrefetch" = true;
         "network.predictor.enabled" = false;
         "network.prefetch-next" = false;
 
-        # WebRTC IP Leak Protection (Forces traffic through your Tier 3 Tor / Tier 1 VPN)
         "media.peerconnection.ice.default_address_only" = true;
       };
 
-      # === 3. BRAVE PARITY: AD BLOCKING ===
-      # Brave has a native adblocker. We force-install uBlock Origin to match/exceed it.
       ExtensionSettings = {
         # uBlock Origin
         "uBlock0@raymondhill.net" = {
@@ -74,7 +61,6 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    # Add the customized browser to system packages
     environment.systemPackages = [ hardened-zen ];
   };
 }

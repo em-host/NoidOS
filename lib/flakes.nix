@@ -1,19 +1,4 @@
-# Helpers for the flake system. Two things use this one file, so they always
-# agree on what a flake file may contain:
-#
-#   * modules/flakes/default.nix  (the NixOS side)
-#   * the `nixos-flakes` command  (the tool side, through a plain `nix eval`)
-#
-# Only `builtins` is used here (no nixpkgs lib), so the command can load this
-# file on its own.
-#
-# A "flake file" is a small .nix file that is nothing but a set of settings:
-#
-#   hosts/flakes/zen-browser.nix
-#     { url = "github:0xc000022070/zen-browser-flake"; packages = [ "default" ]; }
-#
-# Its name (zen-browser) is the flake's name. modules/flakes/_template.nix
-# shows everything such a file may contain.
+# builtins only (no nixpkgs lib): nixos-flakes loads this file with a plain `nix eval`.
 let
   inherit (builtins)
     all
@@ -39,15 +24,11 @@ let
     toJSON
     ;
 
-  # What a flake file may contain.
   settings = [ "url" "packages" "overlays" "modules" "cache" "config" ];
 
-  # Names that would clash with something else in `module.flakes.*`.
   reserved = [ "enable" "package" "nixpkgs" "self" ];
 
-  # A file as it is shown in messages. Inside a flake every file lives in the
-  # Nix store, which would show as /nix/store/<hash>-source/hosts/flakes/x.nix;
-  # people know it as hosts/flakes/x.nix.
+  # /nix/store/<hash>-source/hosts/flakes/x.nix -> hosts/flakes/x.nix
   show = file:
     let
       s = toString file;
@@ -65,17 +46,11 @@ let
   removeSuffix = suffix: s:
     if hasSuffix suffix s then substring 0 (stringLength s - stringLength suffix) s else s;
 
-  # default.nix is the folder's own module; files starting with "_" are
-  # templates and notes.
   ignored = name: name == "default.nix" || startsWith "_" name || !(hasSuffix ".nix" name);
 
-  # The characters that must never appear in a link or key (they would break
-  # the files these values end up in).
   safe = ''[^[:space:]"\\$]+'';
 
-  # Look in one folder. A file that is a plain set with a `url` is a flake
-  # file; anything else (a function, or a set without `url`) is an ordinary
-  # NixOS module and is imported as such.
+  # A plain set with `url` is a flake file; anything else is imported as a NixOS module.
   scanDir = dir:
     if !(pathExists dir) then
       { specs = { }; modules = [ ]; }
@@ -95,7 +70,6 @@ let
         modules = map (f: f.path) (filter (f: !(isSpec f)) loaded);
       };
 
-  # Check one flake file and fill in what it leaves out.
   normalize = name: file: raw:
     let
       problem = msg: throw "\n\nThere is a problem in ${show file}:\n  ${msg}\n";
@@ -121,16 +95,12 @@ let
     in
     if match "[a-z][a-z0-9-]*" name == null then
       throw ''
-
-
         "${name}.nix" can't be used as the name of a flake (${show file}).
           Use lowercase letters, numbers and dashes, starting with a letter,
           for example "zen-browser.nix".
       ''
     else if elem name reserved then
       throw ''
-
-
         "${name}" is not allowed as the name of a flake (${show file}).
           Rename the file to something else.
       ''
@@ -158,7 +128,6 @@ let
         modules = listOf "modules";
       };
 
-  # Every flake file in the given folders, checked, as { name = { url, ... }; }.
   specs = dirs:
     let
       add = acc: found:
@@ -166,8 +135,6 @@ let
           (acc': name:
             if acc' ? ${name} then
               throw ''
-
-
                 The flake "${name}" is defined twice:
                   ${show acc'.${name}.file}
                   ${show found.${name}.file}
@@ -181,11 +148,8 @@ let
     in
     mapAttrs (name: s: normalize name s.file s.raw) everything;
 
-  # Ordinary NixOS modules found in the same folders.
   moduleFiles = dirs: concatLists (map (d: (scanDir d).modules) dirs);
 
-  # The text of hosts/flakes/registry/flake.nix: one input per flake. This is
-  # how Nix gets to know about the links; flake.nix itself never changes.
   registryText = found:
     concatStringsSep "\n" (
       [
@@ -206,7 +170,6 @@ let
       ]
     );
 
-  # The same information without functions, so it can be printed as JSON.
   describe = found:
     mapAttrs
       (_: s: {
@@ -219,7 +182,6 @@ in
 {
   inherit specs moduleFiles registryText describe show;
 
-  # What the command needs in one go (see modules/flakes/nixos-flakes.py).
   forTool = dirs:
     let found = specs dirs;
     in { specs = describe found; registry = registryText found; };

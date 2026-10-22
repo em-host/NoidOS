@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Nix Actions -> Passwords: type in the secrets this computer needs.
-
-The configuration says which secrets exist (myOS.secrets, see
-modules/common/secrets.nix); this asks for their values and hands them to a
-small helper that runs as root (after the usual password question) and writes
-each one to its own file in /var/lib/noid-secrets, readable only by whoever it
-is meant for. The value goes straight from the window to that helper: it is
-never written into the configuration folder, the Nix store or a command line.
-
-The @...@ gaps are filled in by ../nix-actions.nix.
-"""
+"""Nix Actions -> Passwords: type in the secrets declared in myOS.secrets."""
 import json
 import os
 import subprocess

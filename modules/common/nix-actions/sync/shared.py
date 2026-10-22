@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
-"""What of the configuration folder is shared, and how a shared copy is made.
-
-The folder has two halves:
-
-  shared     flake.nix, flake.lock, release.json, lib/, modules/
-             The same on every computer. Written by whoever publishes releases,
-             handed out on the install ISO and with every release.
-  this computer's own
-             hosts/ (hardware, drives, the user's choices, added flakes) and
-             anything else in the folder. Never shared, never replaced.
-
-    shared.py export <folder> <into>     a shared copy of <folder> (what the ISO
-                                         carries and what a release contains)
-    shared.py manifest <folder>          the fingerprints of its shared files
-
-A shared copy has
-  * the shared files, without Python's cache files and editor leftovers,
-  * flake.lock trimmed: flakes added with "Add a Flake" are this computer's own
-    (hosts/flakes), so the lock's `flakes` entry loses its inputs, and every entry
-    nothing reaches any more is dropped. Each computer locks its own added flakes
-    again (nixos-flakes sync, before every rebuild),
-  * release.json with the fingerprint of every shared file ("files"), so a computer
-    can tell later which of them were changed on it.
-
-Used by iso/payload.nix and sync.py. Plain Python, nothing to install.
+"""
+    shared.py export <folder> <into>     a shared copy (flake.lock trimmed, fingerprints in release.json)
+    shared.py manifest <folder>          fingerprints of the shared files
 """
 import hashlib
 import json
@@ -35,7 +13,6 @@ SHARED_FILES = ("flake.nix", "flake.lock", "release.json")
 SHARED_DIRS = ("lib", "modules")
 SHARED = SHARED_FILES + SHARED_DIRS
 
-# Never part of a shared copy, wherever they are.
 SKIP_DIRS = {"__pycache__", ".git", ".direnv", ".mypy_cache", ".pytest_cache"}
 SKIP_SUFFIXES = (".pyc", ".pyo", "~", ".swp", ".swo", ".orig", ".rej")
 SKIP_NAMES = {".DS_Store"}
@@ -43,12 +20,10 @@ SKIP_NAMES = {".DS_Store"}
 RELEASE_ABOUT = ("Release information of this Noid-OS configuration, written by Nix Actions "
                  "-> Publish changes. Do not edit it by hand.")
 
-
 def skipped(name, folder=False):
     """Never shared: caches, editor leftovers, and hidden folders (.git, .vscode, .ruff_cache...)."""
     return (name in SKIP_DIRS or name in SKIP_NAMES or name.endswith(SKIP_SUFFIXES)
             or (folder and name.startswith(".")))
-
 
 def shared_files(root):
     """-> sorted relative paths of the shared files under `root` (symbolic links left out)."""
@@ -71,7 +46,6 @@ def shared_files(root):
                 found.append(os.path.relpath(path, root))
     return sorted(found)
 
-
 def fingerprint(path):
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -79,18 +53,11 @@ def fingerprint(path):
             digest.update(block)
     return digest.hexdigest()
 
-
 def manifest(root):
     """{relative path: sha256} of the shared files, release.json itself left out
     (it cannot hold its own fingerprint)."""
     return {rel: fingerprint(os.path.join(root, rel))
             for rel in shared_files(root) if rel != "release.json"}
-
-
-# ---------------------------------------------------------------------------
-# release.json
-# ---------------------------------------------------------------------------
-
 
 def read_release(root):
     """-> the release information in `root` ({} when there is none or it is unreadable)."""
@@ -101,11 +68,9 @@ def read_release(root):
     except (OSError, ValueError):
         return {}
 
-
 def release_number(info):
     number = info.get("release", 0)
     return number if isinstance(number, int) and number >= 0 else 0
-
 
 def release_text(info):
     """release.json as written: a fixed order of keys, the fingerprints last."""
@@ -119,12 +84,6 @@ def release_text(info):
     if "files" in info:
         ordered["files"] = info["files"]
     return json.dumps(ordered, indent=2, ensure_ascii=False) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# flake.lock
-# ---------------------------------------------------------------------------
-
 
 def trim_lock(lock):
     """The lock without what flakes added on this computer pulled in.
@@ -155,22 +114,14 @@ def trim_lock(lock):
             todo.append(follow(target) if isinstance(target, list) else target)
     return {"nodes": {k: v for k, v in nodes.items() if k in seen}, "root": "root", "version": 7}
 
-
 def lock_text(lock):
     return json.dumps(lock, indent=2, sort_keys=True) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# Making a shared copy
-# ---------------------------------------------------------------------------
-
 
 def copy_file(src, dst):
     """Copies a file so its owner can change the copy (files from the Nix store are read-only)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copyfile(src, dst)
     os.chmod(dst, 0o755 if os.stat(src).st_mode & 0o111 else 0o644)
-
 
 def export(src, dst, release=None):
     """Writes a shared copy of folder `src` into `dst` (which must not hold shared files yet).
@@ -204,7 +155,6 @@ def export(src, dst, release=None):
         f.write(release_text(info))
     return info
 
-
 def main(argv):
     if len(argv) == 4 and argv[1] == "export":
         if any(os.path.exists(os.path.join(argv[3], name)) for name in SHARED):
@@ -218,7 +168,6 @@ def main(argv):
         return 0
     print(__doc__, file=sys.stderr)
     return 2
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

@@ -12,7 +12,7 @@ install a release when their owner wants. Their `hosts/` folder is never publish
 ## On your computer (once)
 
 1. In `hosts/users/user.nix`: `myOS.sync.publish = true;`, then Rebuild. Nix Actions now shows
-   **Publish changes** instead of Get the latest release.
+   **Publish changes** instead of Noid-OS Update.
 2. Nix Actions → Publish changes. The first time it asks where releases go:
    - **GitHub** (easiest): it signs you in through your browser (GitHub shows a code to type in), then makes
      a public repository called `noid-os` for you. You never type a Git command.
@@ -43,7 +43,7 @@ so there is never anything to merge.
 
 ## On the other computers
 
-Nix Actions → **Get the latest release**:
+Nix Actions → **Noid-OS Update**:
 
 - shows "Release 7 is out", with your notes since the release that computer has. **Install** or **Not now**;
 - installing puts the release's shared files in place (after a copy of the old ones) and rebuilds in a
@@ -75,7 +75,7 @@ A release has to work with every computer's own `hosts/` folder, which you never
 
 | What | File |
 | --- | --- |
-| Publish changes, Get the latest release, going back | `sync.py` |
+| Publish changes, Noid-OS Update, going back | `sync.py` |
 | which files are shared, the trimmed lock, fingerprints in `release.json` | `shared.py` (also used by the ISO) |
 | what counts as private | `privacy_check.py` (also used by the ISO) |
 | the terminal window around Publish changes | `publish.sh` |

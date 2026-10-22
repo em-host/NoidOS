@@ -1,36 +1,9 @@
 { mod, config, lib, pkgs, ... }:
 
-# ---------------------------------------------------------------------------
-# Secrets: the passwords and logins this computer needs, kept out of the
-# configuration.
-#
-# A secret (a network share's login, a service's password, an API key) must
-# never be written into a .nix file. Everything in this folder can end up in
-# other people's hands (a copy of the folder, the install ISO), and everything
-# Nix builds lands in /nix/store, which every user of the computer can read.
-#
-# So a secret lives in its own file in /var/lib/noid-secrets, readable only by
-# root (or by the one program it is meant for), and is typed in once on this
-# computer: Nix Actions -> Passwords. The configuration only says that the secret
-# exists and points programs to its file:
-#
-#   myOS.secrets.music-server = {
-#     description = "Password of the music server";
-#     owner = "navidrome";                        # who may read it (root if left out)
-#   };
-#   services.something.passwordFile = config.myOS.secrets.music-server.path;
-#
-# Kinds: "password" (one line), "login" (user name, password and an optional
-# domain, written the way network shares expect them), "text" (anything).
-#
-# Never do any of these with a secret, they all copy it into /nix/store:
+# These copy a secret into the world-readable /nix/store:
 #   password = "hunter2";            builtins.readFile ./secret     (privacy-check: ok)
 #   passwordFile = ./secret;         (a path without quotes)
-# A path IN QUOTES ("/var/lib/noid-secrets/x") is fine: that is only its name.
-#
-# Missing secrets are listed at the end of every rebuild. Network shares
-# (modules/common/shares.nix) ask for theirs by themselves.
-# ---------------------------------------------------------------------------
+# A quoted path string is fine.
 let
   cfg = config.myOS.secrets;
   dir = "/var/lib/noid-secrets";
@@ -75,7 +48,6 @@ let
     };
   });
 
-  # What Nix Actions -> Passwords needs to know (never the secrets themselves).
   manifest = lib.mapAttrs (_: s: { inherit (s) description kind owner group mode path; }) cfg;
 in
 {
@@ -101,16 +73,14 @@ in
       message = ''myOS.secrets: "${name}" cannot be a secret's name. Use lowercase letters, numbers, - and _.'';
     }) cfg;
 
-    # The folder: root's. Others may reach a file in it they are allowed to read,
-    # but cannot list what is there.
+    # 0711: owners can reach their own secret but not list the folder.
     systemd.tmpfiles.settings."10-noid-secrets" = {
       ${dir}.d = { user = "root"; group = "root"; mode = "0711"; };
     } // lib.mapAttrs' (_: s: lib.nameValuePair s.path {
-      # Fix the owner and permissions of a secret that is there (never creates it).
+      # "z" only fixes existing files, never creates empty secrets.
       z = { user = s.owner; group = s.group; inherit (s) mode; };
     }) cfg;
 
-    # At the end of every rebuild: which secrets still have to be typed in.
     system.activationScripts.noid-secrets = lib.mkIf (cfg != { }) {
       deps = [ "users" "groups" ];
       text = ''

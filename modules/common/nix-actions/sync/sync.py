@@ -1,33 +1,9 @@
 #!/usr/bin/env python3
-"""Releases: the shared half of the configuration, from one computer to all the others.
+"""Releases: publish the shared half of the configuration, and install it elsewhere.
 
-One computer is where the configuration is worked on (myOS.sync.publish = true in
-its hosts/users/user.nix). There, Nix Actions -> Publish changes sends the shared
-parts (flake.nix, flake.lock, lib/, modules/; see shared.py) to a public Git
-repository as a numbered release with a note. Every other computer gets Nix
-Actions -> Get the latest release, which shows what is new and installs it when
-its owner wants. hosts/, each computer's own half, is never published and never
-replaced.
-
-    noid-sync gui        Get the latest release (windows; installs through the
-                         terminal action below)
-    noid-sync back       go back to the release this computer had before
-    noid-sync publish    Publish changes (in a terminal)
-    noid-sync status     what this computer has, as JSON
-
-  run by Nix Actions' rebuild in its "new release" mode (rebuild.sh):
-    noid-sync apply      put the waiting release's files in place (after a copy
-                         of the current ones)
-    noid-sync restore    the rebuild failed: put that copy back
-    noid-sync finish     the rebuild worked: keep the copy as "the release before"
-
-Where things are kept (all of it this user's own):
-    ~/.local/state/noid-sync/  pending.json, incoming/ (a release about to be
-                               installed), backup/ (the files as they were before
-                               it), previous/ (the release before the current one)
-    ~/.local/share/noid-sync/  channel/ (publishing only: a copy of the repository)
-
-The @...@ gaps are filled in by ../../nix-actions.nix.
+    noid-sync gui | back | publish | status
+    noid-sync check [--offline] | stage STORE | stage-back | set-channel ADDRESS   (for the Nix Actions window)
+    noid-sync apply | restore | finish      (run by rebuild.sh in "sync" mode)
 """
 import contextlib
 import datetime
@@ -50,18 +26,16 @@ import shared  # noqa: E402
 
 FLAKE = os.path.expanduser(SETTINGS["flakeDir"])
 NIX = [SETTINGS["nix"], "--extra-experimental-features", "nix-command flakes"]
-TITLE = "Get the latest release"
+TITLE = "Noid-OS Update"
 GENERATED = ("hosts/flakes/registry/flake.nix", "hosts/flakes/registry/flake.lock")
 NOTES_KEPT = 50
 DEFAULT_REPO = "noid-os"
 COMMITTER = ["-c", "user.name=Noid-OS", "-c", "user.email=publish@noid-os.invalid",
              "-c", "commit.gpgsign=false"]
 
-
 def _xdg(variable, fallback):
     base = os.environ.get(variable) or os.path.expanduser(fallback)
     return os.path.join(base, "noid-sync")
-
 
 STATE = _xdg("XDG_STATE_HOME", "~/.local/state")
 DATA = _xdg("XDG_DATA_HOME", "~/.local/share")
@@ -71,39 +45,29 @@ BACKUP = os.path.join(STATE, "backup")
 PREVIOUS = os.path.join(STATE, "previous")
 MIRROR = os.path.join(DATA, "channel")
 PUBLISH_SETTINGS = os.path.join(DATA, "publish.json")
-
+LAST_CHECK = os.path.join(STATE, "last-check.json")
 
 class Problem(Exception):
     pass
 
-
 class Stopped(Exception):
     """The person said no. Not an error."""
-
 
 def run(cmd, **kwargs):
     kwargs.setdefault("capture_output", True)
     kwargs.setdefault("text", True)
     return subprocess.run(cmd, **kwargs)
 
-
 def last_lines(text, count=12):
     text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
     lines = [line for line in text.strip().splitlines() if line.strip()]
     return "\n".join(lines[-count:])
-
-
-# ---------------------------------------------------------------------------
-# Files
-# ---------------------------------------------------------------------------
-
 
 def remove(path):
     if os.path.islink(path) or os.path.isfile(path):
         os.unlink(path)
     elif os.path.isdir(path):
         shutil.rmtree(path)
-
 
 def write_atomic(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -118,7 +82,6 @@ def write_atomic(path, text):
             os.unlink(tmp)
         raise
 
-
 def copy_shared(src, dst, extra=()):
     """Copies the shared files of folder `src` (and the files `extra`, where they
     exist) into the new folder `dst`."""
@@ -129,7 +92,6 @@ def copy_shared(src, dst, extra=()):
         source = os.path.join(src, rel)
         if os.path.isfile(source):
             shared.copy_file(source, os.path.join(dst, rel))
-
 
 def replace_shared(src, dst):
     """Makes the shared files of folder `dst` those of `src`: lib/ and modules/
@@ -161,7 +123,6 @@ def replace_shared(src, dst):
         if os.path.lexists(old):
             remove(old)
 
-
 def track_in_git(root):
     """When the folder is a Git repository, Nix only sees the files Git knows about."""
     git = SETTINGS.get("git")
@@ -172,7 +133,6 @@ def track_in_git(root):
         present = [name for name in shared.SHARED + GENERATED if os.path.exists(os.path.join(root, name))]
         run([git, "-C", root, "add", "--intent-to-add", "--force", "--", *present])
 
-
 def read_json(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -180,13 +140,11 @@ def read_json(path):
     except (OSError, ValueError):
         return None
 
-
 def save_channel(channel):
     """Writes where releases come from into this folder's release.json."""
     info = shared.read_release(FLAKE)
     info["channel"] = channel
     write_atomic(os.path.join(FLAKE, "release.json"), shared.release_text(info))
-
 
 def changed_here(info):
     """Shared files this computer changed since its release came in: [(path, how)].
@@ -206,12 +164,6 @@ def changed_here(info):
         elif now[rel] != recorded[rel]:
             found.append((rel, "changed here"))
     return found
-
-
-# ---------------------------------------------------------------------------
-# Where releases come from
-# ---------------------------------------------------------------------------
-
 
 def normalize_channel(text):
     """What someone types (a GitHub page, a Git address) -> the address Nix downloads from."""
@@ -235,7 +187,6 @@ def normalize_channel(text):
     raise ValueError(f'"{text}" is not an address of a Git repository '
                      "(for example https://codeberg.org/someone/noid-os).")
 
-
 def push_url(channel):
     if channel.startswith("github:"):
         return f"https://github.com/{channel[len('github:'):]}.git"
@@ -243,13 +194,11 @@ def push_url(channel):
         return channel[len("git+"):].split("?", 1)[0]
     raise ValueError(f"cannot publish to {channel}")
 
-
 def shown(channel):
     """The channel the way a person reads it."""
     if channel.startswith("github:"):
         return "github.com/" + channel[len("github:"):]
     return re.sub(r"^git\+(https?://|ssh://|file://)?", "", channel).split("?", 1)[0]
-
 
 def fetch(channel):
     """Downloads the newest release. -> its folder in the Nix store."""
@@ -266,25 +215,16 @@ def fetch(channel):
         raise Problem(f"{shown(channel)} does not hold a Noid-OS release (there is no flake.nix).")
     return path
 
-
-# ---------------------------------------------------------------------------
-# Windows (zenity)
-# ---------------------------------------------------------------------------
-
-
 def zenity(*args, stdin=None, title=TITLE):
     result = subprocess.run([SETTINGS["zenity"], f"--title={title}", *args],
                             capture_output=True, text=True, input=stdin)
     return result.returncode, result.stdout.strip()
 
-
 def info(text):
     zenity("--info", "--no-markup", "--width=480", f"--text={text}")
 
-
 def error(text):
     zenity("--error", "--no-markup", "--width=520", f"--text={text}")
-
 
 @contextlib.contextmanager
 def busy(text):
@@ -303,7 +243,6 @@ def busy(text):
         with contextlib.suppress(Exception):
             proc.wait(timeout=5)
 
-
 def another_action_running():
     """Is a Nix action (a rebuild, a cleanup...) busy right now? Same lock as common.sh."""
     path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nix-actions.lock")
@@ -320,7 +259,6 @@ def another_action_running():
     finally:
         os.close(fd)
 
-
 def notes_since(info, after):
     notes = [n for n in info.get("notes", []) if isinstance(n, dict)
              and isinstance(n.get("release"), int) and n["release"] > after]
@@ -335,7 +273,6 @@ def notes_since(info, after):
         lines.append(f"(and {len(notes) - 20} earlier releases)")
         lines.append("")
     return lines
-
 
 def describe(local, remote, here):
     have, new = shared.release_number(local), shared.release_number(remote)
@@ -355,7 +292,7 @@ def describe(local, remote, here):
         f"  - sets the versions of programs to the ones release {new} was tested with.",
         "",
         "You can go back to the release you have now afterwards (Nix Actions ->",
-        "Get the latest release).",
+        "Noid-OS Update).",
     ]
     if here:
         lines += ["", "Changed on this computer, and replaced by the release (a copy is kept in",
@@ -365,17 +302,19 @@ def describe(local, remote, here):
             lines.append(f"  and {len(here) - 15} more")
     return "\n".join(lines) + "\n"
 
-
-def start_install(kind, source, release, channel=None, rev=None):
-    """Hands over to the rebuild in "new release" mode. Does not come back."""
+def write_pending(kind, source, release, channel=None, rev=None):
     os.makedirs(STATE, exist_ok=True)
     write_atomic(PENDING, json.dumps({"kind": kind, "source": source, "release": release,
                                       "channel": channel, "rev": rev}, indent=2) + "\n")
+
+
+def start_install(kind, source, release, channel=None, rev=None):
+    """Hands over to the rebuild in "new release" mode. Does not come back."""
+    write_pending(kind, source, release, channel, rev)
     install = SETTINGS.get("install")
     if not install:
         raise Problem("The install step is missing (this tool was started without it).")
     os.execv(install, [install])
-
 
 def ask_channel():
     code, text = zenity(
@@ -391,7 +330,6 @@ def ask_channel():
     except ValueError as e:
         error(str(e))
         return None
-
 
 def gui_check():
     if SETTINGS.get("publisher"):
@@ -419,7 +357,7 @@ def gui_check():
         error(str(e))
         return 1
     if not local.get("channel"):
-        save_channel(channel)  # it worked: remember it
+        save_channel(channel)
         local = shared.read_release(FLAKE)
 
     remote = shared.read_release(store)
@@ -451,7 +389,6 @@ def gui_check():
     start_install("update", INCOMING, new, channel=channel)
     return 0
 
-
 def unfinished():
     """-> the install that was started and did not finish (its files are in place, its
     copy of the old ones too), or None."""
@@ -459,7 +396,6 @@ def unfinished():
     if pending and pending.get("backupDone") and os.path.isfile(os.path.join(BACKUP, "flake.nix")):
         return pending
     return None
-
 
 def gui_unfinished():
     pending = unfinished()
@@ -482,7 +418,6 @@ def gui_unfinished():
              "choose Rebuild.")
     return 0
 
-
 def gui_back():
     if another_action_running():
         info("Another Nix action is running right now. Try again once it is done.")
@@ -499,24 +434,18 @@ def gui_back():
         f"--text=Go back to release {back}? This computer has release {have}.\n\n"
         "The shared parts (flake.nix, flake.lock, lib/ and modules/) go back to how they were, "
         "and the system is rebuilt. This computer's own settings (hosts/) stay as they are.\n\n"
-        f"You can install release {have} or a newer one again later with Get the latest release.",
+        f"You can install release {have} or a newer one again later with Noid-OS Update.",
         f"--ok-label=Go back to release {back}", "--cancel-label=Not now")
     if code != 0:
         return 0
     start_install("back", PREVIOUS, back)
     return 0
 
-
-# ---------------------------------------------------------------------------
-# The steps the rebuild runs (in its terminal window)
-# ---------------------------------------------------------------------------
-
-
 def apply():
     pending = read_json(PENDING)
     if not pending or not os.path.isfile(os.path.join(str(pending.get("source")), "flake.nix")):
         print("There is no release waiting to be installed. Open Nix Actions and choose")
-        print("Get the latest release.")
+        print("Noid-OS Update.")
         return 1
     source, release = pending["source"], pending.get("release")
     if not os.path.isfile(os.path.join(FLAKE, "flake.nix")):
@@ -524,12 +453,10 @@ def apply():
         return 1
 
     if pending.get("backupDone") and os.path.isfile(os.path.join(BACKUP, "flake.nix")):
-        # The install was started before and did not finish: the copy made then is
-        # the one of the files as they were, so it stays.
+        # Resuming an interrupted install: keep the backup of the original files.
         print("Continuing the install that did not finish last time.")
     else:
-        # A copy of everything that is about to change, first. (The added flakes' list in
-        # hosts/flakes/registry is rewritten by the rebuild; it is kept so it can go back too.)
+        # The registry is backed up too: nixos-flakes sync rewrites it during the rebuild.
         fresh = BACKUP + ".new"
         copy_shared(FLAKE, fresh, extra=GENERATED)
         if os.path.lexists(BACKUP):
@@ -553,7 +480,6 @@ def apply():
     print("settings (hosts/) were left as they are.")
     return 0
 
-
 def restore():
     if not os.path.isfile(os.path.join(BACKUP, "flake.nix")):
         print("There is no copy to put back.")
@@ -574,7 +500,6 @@ def restore():
     print("Your previous files are back in place: this computer stays on the release it had.")
     return 0
 
-
 def finish():
     pending = read_json(PENDING) or {}
     if os.path.isdir(BACKUP):
@@ -589,6 +514,78 @@ def finish():
         print(f"Done. This computer is back on release {release}.")
     else:
         print(f"Done. Release {release} is installed.")
+    return 0
+
+def note_list(info, after=0):
+    notes = [n for n in info.get("notes", []) if isinstance(n, dict)
+             and isinstance(n.get("release"), int) and n["release"] > after]
+    return sorted(notes, key=lambda n: n["release"], reverse=True)[:NOTES_KEPT]
+
+
+def check(online=True):
+    """Everything the Nix Actions window shows about releases, as JSON."""
+    local = shared.read_release(FLAKE)
+    have = shared.release_number(local)
+    channel = local.get("channel")
+    previous = shared.read_release(PREVIOUS) if os.path.isfile(os.path.join(PREVIOUS, "flake.nix")) else None
+    pending = unfinished()
+    result = {
+        "publisher": bool(SETTINGS.get("publisher")),
+        "channel": channel,
+        "shown": shown(channel) if channel else None,
+        "release": have,
+        "date": local.get("date"),
+        "previous": shared.release_number(previous) if previous is not None else None,
+        "unfinished": {"release": pending.get("release"), "kind": pending.get("kind")} if pending else None,
+        "history": note_list(local),
+        "remote": None,
+        "error": None,
+        "lastCheck": (read_json(LAST_CHECK) or {}).get("time"),
+    }
+    if online and channel and not result["publisher"] and not pending:
+        try:
+            store = fetch(channel)
+        except Problem as e:
+            result["error"] = str(e)
+        else:
+            remote = shared.read_release(store)
+            result["remote"] = {
+                "release": shared.release_number(remote),
+                "date": remote.get("date"),
+                "store": store,
+                "notes": note_list(remote, after=have),
+                "changedHere": [f"{rel} ({how})" for rel, how in changed_here(local)],
+            }
+            result["history"] = note_list(remote) or result["history"]
+            result["lastCheck"] = datetime.datetime.now().isoformat(timespec="minutes")
+            os.makedirs(STATE, exist_ok=True)
+            write_atomic(LAST_CHECK, json.dumps({"time": result["lastCheck"]}) + "\n")
+    print(json.dumps(result))
+    return 0
+
+
+def stage(store):
+    """Gets a downloaded release ready for the install step (rebuild.sh, mode "sync")."""
+    if not store.startswith("/nix/store/") or not os.path.isfile(os.path.join(store, "flake.nix")):
+        raise Problem(f"{store} is not a downloaded release.")
+    release = shared.release_number(shared.read_release(store))
+    copy_shared(store, INCOMING)
+    write_pending("update", INCOMING, release, channel=shared.read_release(FLAKE).get("channel"))
+    return 0
+
+
+def stage_back():
+    if not os.path.isfile(os.path.join(PREVIOUS, "flake.nix")):
+        raise Problem("There is no earlier release to go back to on this computer.")
+    write_pending("back", PREVIOUS, shared.release_number(shared.read_release(PREVIOUS)))
+    return 0
+
+
+def set_channel(text):
+    try:
+        save_channel(normalize_channel(text))
+    except ValueError as e:
+        raise Problem(str(e)) from e
     return 0
 
 
@@ -606,33 +603,23 @@ def status():
     }, indent=2))
     return 0
 
-
-# ---------------------------------------------------------------------------
-# Publish changes (in a terminal)
-# ---------------------------------------------------------------------------
-
-
 def ask(question):
     try:
         return input(question).strip()
     except EOFError:
         return ""
 
-
 def yes(question):
     return ask(f"{question} [y/N] ").lower() in ("y", "yes")
-
 
 def say(*lines):
     for line in lines:
         print(line)
 
-
 def gh(*args, interactive=False):
     if interactive:
         return subprocess.run([SETTINGS["gh"], *args])
     return run([SETTINGS["gh"], *args])
-
 
 def setup_github():
     if not SETTINGS.get("gh"):
@@ -676,7 +663,6 @@ def setup_github():
             raise Problem("The repository could not be made. Nothing was published.")
     return f"github:{full}", None
 
-
 def setup_other():
     say("", "Type the repository's address. It must be public, so the other computers can",
         "download from it. For example:  https://codeberg.org/you/noid-os",
@@ -691,7 +677,6 @@ def setup_other():
         raise Problem(str(e)) from e
     push = text.strip() if re.match(r"(ssh://)?git@", text.strip()) else None
     return channel, push
-
 
 def setup_channel():
     say("Publishing needs a place on the internet that the other computers download",
@@ -713,7 +698,6 @@ def setup_channel():
     save_channel(channel)
     say("", f"Releases go to {shown(channel)}. (This is remembered; it is in release.json.)")
     return channel
-
 
 class Mirror:
     """This computer's copy of the repository releases are published to."""
@@ -796,7 +780,6 @@ class Mirror:
             raise Problem("Sending did not work (see above), so nothing was published. Check the internet\n"
                           "connection, and that you may write to that repository.")
 
-
 def merged_notes(*infos):
     by_number = {}
     for one in infos:
@@ -805,13 +788,11 @@ def merged_notes(*infos):
                 by_number.setdefault(note["release"], note)
     return [by_number[n] for n in sorted(by_number, reverse=True)][:NOTES_KEPT]
 
-
 def list_changes(old, new):
     rows = [(rel, "new") for rel in sorted(set(new) - set(old))]
     rows += [(rel, "removed") for rel in sorted(set(old) - set(new))]
     rows += [(rel, "changed") for rel in sorted(set(old) & set(new)) if old[rel] != new[rel]]
     return sorted(rows)
-
 
 def readme(info):
     latest = info["notes"][0] if info.get("notes") else {}
@@ -824,7 +805,6 @@ def readme(info):
         "choices), which is never part of this repository.\n\n"
         f"Latest: release {info['release']} ({info.get('date', '')}): {latest.get('note', '')}\n"
     )
-
 
 def works_here(stage, scratch):
     """Evaluates this computer's own system with the files about to be published.
@@ -850,16 +830,14 @@ def works_here(stage, scratch):
                       "published. Fix it, Rebuild, and publish again.")
     if result.stdout.strip() == running:
         return True
-    # Leftovers that are never published (Python's cache files, editor backups) can
-    # end up in a system built from the folder itself. So: is the running system the
-    # folder exactly as Rebuild sees it? Then it differs from the release only in those.
+    # Unpublished leftovers (__pycache__, editor backups) can make the folder's own system
+    # differ; compare against the folder as Rebuild sees it.
     say("Not quite the same. Checking against your folder as Rebuild sees it...")
     folder = system_of(FLAKE)
     if folder.returncode == 0 and folder.stdout.strip() == running:
         say("It is: the only difference is leftover files that are never published.")
         return True
     return False
-
 
 def publish():
     if os.geteuid() == 0 and not os.environ.get("NOID_SYNC_ALLOW_ROOT"):
@@ -935,14 +913,10 @@ def publish():
         mirror.commit_and_push(f"Release {number}: {note}")
         write_atomic(os.path.join(FLAKE, "release.json"), shared.release_text(final))
         say("", f"Release {number} is published at {shown(channel)}.",
-            "The other computers find it in Nix Actions -> Get the latest release.")
+            "The other computers find it in Nix Actions -> Noid-OS Update.")
         return 0
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-
 
 def main(argv):
     command = argv[1] if len(argv) > 1 else "gui"
@@ -959,6 +933,14 @@ def main(argv):
             return finish()
         if command == "status":
             return status()
+        if command == "check":
+            return check(online="--offline" not in argv)
+        if command == "stage" and len(argv) == 3:
+            return stage(argv[2])
+        if command == "stage-back":
+            return stage_back()
+        if command == "set-channel" and len(argv) == 3:
+            return set_channel(argv[2])
         if command == "publish":
             return publish()
     except Stopped:
@@ -972,7 +954,6 @@ def main(argv):
         return 1
     print(__doc__, file=sys.stderr)
     return 2
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

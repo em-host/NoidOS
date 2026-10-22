@@ -1,23 +1,5 @@
 { mod, config, lib, pkgs, ... }:
 
-# ---------------------------------------------------------------------------
-# Network shares (SMB / Windows file sharing), opened at a folder.
-#
-# In hosts/users/user.nix, so the address stays on this computer:
-#
-#   myOS.shares."/mnt/music" = {
-#     address = "//nas.local/music";   # the server's name (or address) and share (privacy-check: ok)
-#     options = [ "vers=2.0" ];        # only if the server needs it
-#   };
-#
-# The login is not written here: it is a secret (modules/common/secrets.nix),
-# typed in once with Nix Actions -> Passwords, and kept in a file only root can
-# read. A share without a login: guest = true.
-#
-# The share is opened the first time the folder is used, not while starting up,
-# and closed again after a minute without use, so a computer that is away from
-# that network starts and works normally (the folder is just empty there).
-# ---------------------------------------------------------------------------
 let
   cfg = config.myOS.shares;
   user = config.myOS.username;
@@ -66,8 +48,6 @@ in
       message = ''myOS.shares: "${folder}" must be a full folder path without spaces, e.g. /mnt/music.'';
     }) cfg;
 
-    # Each share's login (modules/common/secrets.nix): read only by root, which
-    # is who opens the share.
     myOS.secrets = lib.mapAttrs' (folder: s: lib.nameValuePair (secretName folder) {
       description = "Login for the network share ${s.address} (${folder})";
       kind = "login";
@@ -77,13 +57,13 @@ in
       device = s.address;
       fsType = "cifs";
       options = [
-        "x-systemd.automount" # opened when the folder is first used
+        "x-systemd.automount"
         "noauto"
-        "x-systemd.idle-timeout=60" # and closed after a minute without use
+        "x-systemd.idle-timeout=60"
         "x-systemd.device-timeout=5s"
         "x-systemd.mount-timeout=5s"
         "_netdev"
-        "uid=${uid}" # the files are yours
+        "uid=${uid}"
         "gid=${gid}"
       ]
       ++ (if s.guest then [ "guest" ]

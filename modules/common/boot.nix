@@ -1,34 +1,13 @@
 { mod, config, pkgs, lib, inputs, ... }:
 
-# Bootloader (GRUB + Minecraft theme) and kernel.
-#
-# Everything here is a default (mkDefault), so a host can change any of it in
-# hosts/users/user.nix without mkForce, e.g.
-#
-#   boot.kernelPackages = pkgs.linuxPackages_latest;
-#   boot.loader.grub.configurationLimit = 20;
-#
-# Windows gets a themed entry here, since most people dual boot. Entries that only
-# exist on one machine (a USB stick, another disk) go in user.nix instead, via
-# `boot.loader.grub.extraEntries` and `boot.loader.grub.minegrub-world-sel.customIcons`
-# (that list is added to, not replaced).
 let
   cfg = config.module.boot;
   bios = cfg.biosDevice != null;
 
-  # ---- kernel modules from outside the kernel need a certificate --------------
-  # Since mid-October 2026 nixpkgs signs every kernel module (with kmodigest) and
-  # gives each module that is not part of the kernel its own certificate file,
-  # <module>.ko.cer. Packages that copy their module into place by hand instead
-  # of using the kernel's install step come without one, and then the whole system
-  # fails to build:
-  #     cat: extra/framework_laptop.ko.cer: No such file or directory
-  # Hit by the Framework laptop driver (NixOS-Hardware's Framework profiles) and
-  # Broadcom Wi-Fi (wl, which the hardware scan adds by itself), among others.
-  # This signs such modules the same way nixpkgs signs all others, just before
-  # they are collected. Everything else is passed through unchanged (as links),
-  # and with an older nixpkgs that does not sign modules, nothing happens at all.
-  # It can go once nixpkgs fixes those packages.
+  # nixpkgs workaround (Oct 2026): aggregateModules expects a <module>.ko.cer next to every
+  # out-of-tree module, but packages that install .ko files by hand (framework-laptop-kmod,
+  # broadcom-sta) ship none: "cat: extra/framework_laptop.ko.cer: No such file or directory".
+  # Sign those with kmodigest before aggregation; no-op without kmodigest. Remove once fixed.
   signModules = pkgs: pkg:
     if (pkg.outputName or "out") == "modules" then pkg # the kernel's own modules
     else
@@ -89,21 +68,18 @@ in
           enable = lib.mkDefault true;
           efiSupport = lib.mkDefault (!bios);
           device = lib.mkDefault (if bios then cfg.biosDevice else "nodev");
-          useOSProber = lib.mkDefault true; # lists Windows / other Linux installs
+          useOSProber = lib.mkDefault true;
 
-          # The theme is laid out for 1080p. Screens that cannot do it fall back
-          # to their own resolution instead of failing.
+          # The theme is laid out for 1080p.
           gfxmodeEfi = lib.mkDefault "1920x1080,auto";
           gfxmodeBios = lib.mkDefault "1920x1080,auto";
 
-          # Each entry keeps a kernel + initrd on the boot partition. The default
-          # of 100 can fill a small one, after which updates fail.
+          # The default of 100 entries can fill a small boot partition.
           configurationLimit = lib.mkDefault 10;
 
           minegrub-world-sel.enable = lib.mkDefault true;
 
-          # Icon and text for Windows in the boot menu (found by os-prober above).
-          # Not a default on purpose: a host's own entries are added to this list.
+          # Not mkDefault: hosts append their own entries to this list.
           minegrub-world-sel.customIcons = [
             {
               name = "Windows";

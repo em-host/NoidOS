@@ -1,8 +1,3 @@
-# Universal Wine: double-click any Windows .exe and it just runs.
-#
-# One shared Proton prefix (via umu-launcher) is built on first use. Save data
-# lives OUTSIDE the prefix (~/Universal Wine Saves), so the prefix can be
-# rebuilt at any time without losing progress.
 { config, lib, pkgs, ... }:
 
 let
@@ -87,7 +82,6 @@ let
     fi
     exec > >(tee -a "$LOG_FILE") 2>&1
 
-    # ------------------------------- helpers ------------------------------------
     log()    { printf '[uniwine %s] %s\n' "$(date +%T)" "$*"; }
     have()   { command -v "$1" >/dev/null 2>&1; }
     notify() { notify-send --app-name="$APP" --icon=applications-games "$1" "''${2:-}" >/dev/null 2>&1 || true; }
@@ -125,7 +119,6 @@ let
       exit 1
     }
 
-    # ------------------------------ environment ---------------------------------
     export WINEPREFIX="$PREFIX"
     export GAMEID="''${GAMEID:-umu-default}"
     [ -z "$PROTON_PATH" ] || export PROTONPATH="$PROTON_PATH"
@@ -138,7 +131,6 @@ let
     export VKD3D_SHADER_DEBUG=none
     export VKD3D_DISABLE_EXTENSIONS=VK_EXT_debug_utils
 
-    # ------------------------------- registry -----------------------------------
     # Saves in HKCU\Software are kept as a plain copy of the prefix's user.reg and
     # re-imported into a freshly built prefix. Wine's own keys (Software\Wine,
     # Software\Valve) are deliberately NOT restored, so stale DLL overrides or
@@ -182,7 +174,6 @@ let
       rm -f "$out"
     }
 
-    # --------------------------------- prefix -----------------------------------
     prefix_current() {
       [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CONFIG_HASH" ]
     }
@@ -268,7 +259,6 @@ let
       exec 9>&-   # never hand the lock to the game
     }
 
-    # ---------------------------------- running ---------------------------------
     detect_resolution() {
       local d res
       for d in /sys/class/drm/card*-*; do
@@ -375,7 +365,6 @@ let
       ensure_prefix
     }
 
-    # ----------------------------------- main -----------------------------------
     case "''${1:-}" in
       --no-gamescope) USE_GAMESCOPE=0; shift ;;
     esac
@@ -411,7 +400,6 @@ let
     });
 in
 {
-  # Same on/off switch name as every other common module.
   imports = [
     (lib.mkAliasOptionModule [ "module" "windows-compat" "enable" ] [ "programs" "universal-wine" "enable" ])
   ];
@@ -487,7 +475,6 @@ in
   };
 
   config = mkIf cfg.enable {
-    # 32-bit GL/Vulkan drivers are required for 32-bit games under Proton.
     hardware.graphics = {
       enable = mkDefault true;
       enable32Bit = mkDefault true;
@@ -505,8 +492,6 @@ in
     ] ++ lib.optional cfg.gamescope.enable
       (mkItem { name = "uniwine-windowed"; desktopName = "Universal Wine (no Gamescope)"; args = "--no-gamescope "; });
 
-    # Make it the default double-click action for Windows executables.
-    # (A user's own ~/.config/mimeapps.list still takes precedence.)
     xdg.mime.defaultApplications = lib.genAttrs windowsMimeTypes (_: mkDefault "uniwine.desktop");
   };
 }

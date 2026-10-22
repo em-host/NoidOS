@@ -9,9 +9,7 @@ in
 
   config = lib.mkMerge [
     {
-      # This is only the name the flake knows this computer by (Nix Actions
-      # uses it), so it is the same everywhere and stays even with the switch
-      # off. The name the network sees is random, see randomize-hostname below.
+      # The flake output name (Nix Actions uses it); the network sees randomize-hostname's.
       networking.hostName = lib.mkDefault "Noid-OS";
     }
 
@@ -46,10 +44,7 @@ in
           ACTION=="add|remove", SUBSYSTEM=="net", ENV{DEVTYPE}=="wlan", RUN:="${pkgs.coreutils}/bin/true"
         '');
 
-      # A new random hostname on every boot, set before the network comes up, so
-      # routers and other computers on a network never see the username or the
-      # same name twice. (`sudo` and friends still work: systemd's "myhostname"
-      # lookup always resolves whatever the current hostname is.)
+      # Set before the network comes up; sudo keeps working through nss-myhostname.
       systemd.services.randomize-hostname = {
         description = "Random hostname for this boot";
         wantedBy = [ "multi-user.target" "network-pre.target" ];

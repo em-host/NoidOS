@@ -1,8 +1,3 @@
-// Adds a "Nix Actions" button to the system menu, right next to the power
-// button. Clicking it opens the Nix Actions menu (the `nix-actions` command,
-// installed by modules/common/nix-actions.nix), where rebuilding, updating,
-// adding a flake and cleaning up are chosen.
-
 import Gio from 'gi://Gio';
 import St from 'gi://St';
 
@@ -32,7 +27,6 @@ export default class NixActionsButton extends Extension {
             accessible_name: _('Nix Actions'),
             child: new St.Icon({
                 gicon: new Gio.ThemedIcon({
-                    // First one that exists in the icon theme wins.
                     names: [
                         'system-software-update-symbolic',
                         'software-update-available-symbolic',
@@ -47,7 +41,6 @@ export default class NixActionsButton extends Extension {
             Util.spawn([COMMAND]);
         });
 
-        // Put it directly before (to the left of) the power button.
         row.insert_child_below(this._button, powerButton);
     }
 

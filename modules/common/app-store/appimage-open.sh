@@ -1,6 +1,5 @@
 set -euo pipefail
 
-# The @...@ placeholders below are filled in by ../app-store.nix.
 export PATH="@path@:$PATH"
 folder=@folder@
 appimage_run=@appimageRun@
@@ -10,7 +9,6 @@ apps_dir="$HOME/$folder"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/appimage-integration"
 seen_file="$state_dir/seen"
 
-# --- appimage-open --remove FILE: used by the "Remove this app" menu action ---
 if [ "${1:-}" = "--remove" ]; then
   file="${2:?usage: appimage-open --remove FILE}"
   name="$(basename "$file")"
@@ -32,9 +30,8 @@ shift
 real="$(realpath -- "$file")"
 name="$(basename "$real")"
 
-# --- Only ask when a person just double-clicked a file --------------------------
-# Never ask for: a terminal, a script, an app with arguments, a file that is
-# already in the AppImages folder, a file the person already said "just run" for.
+# Only ask for a plain double-click: not from a terminal or script, not with arguments,
+# not for files already in ~/Applications or marked "just run".
 ask=@ask@
 if [ -t 0 ] || [ -t 1 ]; then ask=0; fi
 if [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then ask=0; fi
@@ -61,7 +58,7 @@ if [ "$ask" = "1" ]; then
     mkdir -p "$state_dir"
     printf '%s\n' "$real" >> "$seen_file"
   else
-    exit 0 # cancelled
+    exit 0
   fi
 fi
 

@@ -1,6 +1,5 @@
 set -euo pipefail
 
-# The @...@ placeholders below are filled in by ../app-store.nix.
 export PATH="@path@:$PATH"
 folder=@folder@
 
@@ -21,8 +20,7 @@ slug() {
     | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g'
 }
 
-# Copy the menu entry and icons out of an AppImage into the directory $2.
-# Works the same way as appimage-run does (see nixpkgs appimage-exec.sh).
+# Same extraction as nixpkgs' appimage-exec.sh.
 extract_metadata() {
   local app="$1" out="$2" header signature type offset
   header="$(LC_ALL=C readelf -h "$app" 2>/dev/null)" || return 1
@@ -51,8 +49,6 @@ extract_metadata() {
   esac
 }
 
-# Print the best icon file found in the extracted directory $1, for the icon
-# name $2 taken from the .desktop file. Prints nothing if there is none.
 find_icon() {
   local dir="$1" name="$2" f
 
@@ -60,7 +56,6 @@ find_icon() {
     for f in "$dir/$name.svg" "$dir/$name.png" "$dir/$name.xpm"; do
       if [ -f "$f" ]; then printf '%s\n' "$f"; return; fi
     done
-    # The biggest matching file under usr/share/icons.
     f="$(find "$dir/usr/share/icons" -type f \( -name "$name.svg" -o -name "$name.png" \) \
           -printf '%s %p\n' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2-)"
     if [ -n "$f" ]; then printf '%s\n' "$f"; return; fi
@@ -77,9 +72,6 @@ find_icon() {
   if [ -n "$f" ]; then printf '%s\n' "$f"; fi
 }
 
-# Write the menu entry $4 for the AppImage $1, from the AppImage's own .desktop
-# file $2 (may be empty) and icon $3 (may be empty). Every entry also gets a
-# "Remove this app" action (right-click the app in the menu).
 write_entry() {
   local app="$1" source_desktop="$2" icon="$3" dest="$4" fallback_name has_actions=0
   if [ -n "$source_desktop" ]; then
@@ -100,7 +92,6 @@ write_entry() {
             print "Exec=appimage-open --remove \"" app "\"" }
     ' "$source_desktop" > "$dest.tmp"
   else
-    # The AppImage ships no menu entry: make a plain one.
     fallback_name="$(basename "$app")"
     fallback_name="${fallback_name%.[Aa]pp[Ii]mage}"
     {
@@ -151,7 +142,6 @@ integrate_one() {
   log "added $(basename "$app") to the app menu"
 }
 
-# Remove menu entries whose AppImage has been deleted. Prints 1 if it removed any.
 cleanup() {
   local entry source id removed=0
   for entry in "$desktop_dir"/appimage-*.desktop; do
@@ -182,7 +172,6 @@ sync_all() {
     [ -n "$id" ] || continue
     dest="$desktop_dir/appimage-$id.desktop"
 
-    # Already done, and the AppImage has not been replaced since.
     if [ -f "$dest" ] && [ ! "$app" -nt "$dest" ]; then continue; fi
 
     if integrate_one "$app" "$id"; then
@@ -210,8 +199,7 @@ case "${1:-}" in
     ;;
   --watch)
     sync_all
-    # Wait for changes in the folder; events that arrive close together are
-    # handled in one go (a download or copy produces several).
+    # Bursts of events (a download or copy) are handled in one go.
     inotifywait -m -q -e close_write -e moved_to -e moved_from -e delete "$apps_dir" |
       while read -r _; do
         while read -r -t 2 _; do :; done

@@ -1,10 +1,4 @@
 { lib, ... }:
-
-# Picks NixOS-Hardware profiles by name, for a host's `imports`:
-#
-#   imports = mod.hardware inputs [ "framework-16-7040-amd" ];
-#
-# Names are the ones in https://github.com/NixOS/nixos-hardware (see its flake.nix).
 {
   hardware = inputs: names:
     map (name:

@@ -1,70 +1,5 @@
 { mod, config, lib, pkgs, ... }:
 
-# ---------------------------------------------------------------------------
-# Nix Actions: one menu for looking after the system. No terminal knowledge
-# needed. It opens from
-#
-#   * the app menu ("Nix Actions"), on every desktop
-#   * a panel button: in the system menu next to the power button on GNOME,
-#     a widget in the panel on KDE Plasma, a button in the top panel next to
-#     the power button on COSMIC
-#   * a terminal:  nix-actions   (or  nix-actions rebuild | update | flake | cleanup)
-#
-# and offers
-#
-#   Rebuild            applies your configuration with the versions of
-#                      everything that are already locked in flake.lock:
-#                          sudo nixos-rebuild switch --flake .#<hostname>
-#   Update & Rebuild   first fetches the newest versions of everything
-#                      (nix flake update), then does the same. If the new
-#                      versions do not build, the old ones are put back.
-#   Get the latest release
-#                      shows what is new in this system since this computer's
-#                      release and installs it when its owner wants (the
-#                      shared parts only: hosts/ stays as it is). If it does
-#                      not build, everything is put back. Can go back one release.
-#   Publish changes    only on the computer where the configuration is worked on
-#                      (myOS.sync.publish = true): sends flake.nix, flake.lock,
-#                      lib/ and modules/ to a public Git repository as the next
-#                      release, after the privacy check. See ./nix-actions/sync/.
-#   Add a Flake        adds programs or settings from a link (modules/flakes/).
-#                      Only shown while that module is on.
-#   Drives             opens another drive at a fixed folder on every start, or
-#                      stops doing so (hosts/drives.nix, modules/common/drives.nix).
-#   Passwords          types in the secrets the configuration needs (a network
-#                      share's login...), see modules/common/secrets.nix. Only
-#                      shown when there are any.
-#   Clean up           frees disk space right now: removes old system versions
-#                      and unused programs (as set in modules/common/garbage-clean.nix),
-#                      updates the boot menu, and lets identical files share space.
-#
-# Rebuild, Update and Clean up open a terminal window that shows the progress
-# and takes the password when sudo asks for it. Before a rebuild, flakes added
-# with "Add a Flake" are made ready.
-#
-# Everything the actions need lives in ./nix-actions/:
-#   menu.sh                        the menu and the nix-actions command
-#   rebuild.sh, cleanup.sh         the actions that run in a terminal
-#   sync/                          releases: sync.py (Get the latest release,
-#                                  Publish changes), shared.py (what is shared),
-#                                  privacy_check.py, publish.sh
-#   drives.py                      Drives (windows only, no terminal)
-#   passwords.py                   Passwords (windows only; a root helper writes the files)
-#   common.sh                      the start they share (open a terminal, one at a time)
-#   gnome/, plasma/, place-widget  the GNOME and Plasma panel buttons
-#   cosmic/                        the icons of the COSMIC button
-#
-# (The panel buttons keep the names they had when they only did Rebuild, so the
-# button that is already in a Plasma panel or GNOME menu keeps working.)
-#
-# COSMIC: the button is one of COSMIC's own "panel button" applets (the kind
-# that opens an app when pressed), so no program has to be built for it. It is
-# put into the top panel's default layout, just left of the power button. A
-# panel that has been rearranged in COSMIC Settings keeps its own layout; there
-# the button is added by hand: Settings -> Desktop -> Panel -> Configure panel
-# applets -> "Nix Actions".
-# ---------------------------------------------------------------------------
-
 let
   cfg = config.module.nix-actions;
   opts = config.myOS.nixActions;
@@ -75,24 +10,17 @@ let
 
   assets = ./nix-actions;
 
-  # The terminal the actions open. (KDE and COSMIC have their own; GNOME gets
-  # GNOME Console, which works anywhere.)
   terminal =
     if isPlasma then [ "${pkgs.kdePackages.konsole}/bin/konsole" "-e" ]
     else if isCosmic then [ "${pkgs.cosmic-term}/bin/cosmic-term" "-e" ]
     else [ "${pkgs.gnome-console}/bin/kgx" "-e" ];
 
-  # The "Add a Flake" command, or null when that module is switched off or not
-  # there at all (then Update just runs plain `nix flake update`).
   flakesTool = config.module.flakes.package or null;
   flakesCommand = lib.optionalString (flakesTool != null) "${flakesTool}/bin/nixos-flakes";
 
   nix = config.nix.package;
   q = lib.escapeShellArg;
 
-  # ---- the scripts -----------------------------------------------------------
-  # Each script is a plain file in ./nix-actions with @...@ gaps that are filled
-  # in here. The ones that run in a terminal start with common.sh (@common@).
   fill = values: text:
     builtins.replaceStrings (builtins.attrNames values) (builtins.attrValues values) text;
 
@@ -107,8 +35,7 @@ let
       (builtins.replaceStrings [ "@common@" ] [ common ]
         (builtins.readFile (assets + "/${file}"))));
 
-  # One copy per mode, because a script that starts itself again inside a
-  # terminal cannot rely on being handed an argument.
+  # One script per mode: a script that re-executes itself inside a terminal loses its arguments.
   rebuildScript = mode: terminalScript "nix-actions-${mode}" "rebuild.sh" {
     "@mode@" = mode;
     "@flakeDir@" = q config.myOS.flakeDir;
@@ -121,13 +48,10 @@ let
   update = rebuildScript "update";
   installRelease = rebuildScript "sync";
 
-  # ---- Releases: Get the latest release / Publish changes (./nix-actions/sync) ----
   syncOn = config.module.sync.enable;
   publisher = config.myOS.sync.publish;
   syncDir = assets + "/sync";
 
-  # The same tool twice: as the rebuild above runs it (apply, restore, finish,
-  # and publish), and as the menu runs it, which also needs to know that rebuild.
   syncScript = name: extra: pkgs.writeScript name (
     builtins.replaceStrings
       [ "#!/usr/bin/env python3" "@settings@" ]
@@ -151,8 +75,6 @@ let
   releases = syncScript "nix-actions-releases" { install = "${installRelease}"; };
   publish = terminalScript "nix-actions-publish" "sync/publish.sh" { "@sync@" = q "${syncTool}"; };
 
-  # ---- Clean up: what the automatic cleanup is set to, in words ---------------
-  # (nix.gc.options is what garbage-clean.nix sets, e.g. "--delete-older-than 14d".)
   gcOptions = config.nix.gc.options;
   olderThan = builtins.match ".*--delete-older-than ([0-9]+)d.*" gcOptions;
   deleteAll = builtins.match "(.* )?(-d|--delete-old)( .*)?" gcOptions != null;
@@ -183,7 +105,6 @@ let
     "@numfmt@" = q "${pkgs.coreutils}/bin/numfmt";
   };
 
-  # ---- Drives: another disk at a fixed folder (modules/common/drives.nix) -----------
   drives = pkgs.writeScript "nix-actions-drives" (
     builtins.replaceStrings
       [ "#!/usr/bin/env python3" "@settings@" ]
@@ -203,13 +124,10 @@ let
   );
   drivesOn = config.module.drives.enable or false;
 
-  # ---- Passwords: type in the secrets of modules/common/secrets.nix ---------------
   secretsManifest = if config.module.secrets.enable or false then config.module.secrets.manifest else { };
   passwordsOn = secretsManifest != { };
 
-  # Runs as root (through pkexec, which asks for the password): takes ONE secret's
-  # value on its standard input and writes it to that secret's file, with that
-  # secret's owner and permissions. Only names the configuration declares.
+  # Runs as root through pkexec; writes stdin to one declared secret only.
   secretWriter = pkgs.writeShellScript "noid-secret-write" ''
     set -euo pipefail
     export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
@@ -233,6 +151,30 @@ let
     trap - EXIT
   '';
 
+  appStore = config.module.app-store.flatpak or { };
+  appLocations = appStore.locationsManifest or { };
+  appDrivesOn = appLocations != { };
+
+  appDrivesScript = name: mover: pkgs.writeScript name (
+    builtins.replaceStrings
+      [ "#!/usr/bin/env python3" "@settings@" ]
+      [
+        "#!${pkgs.python3}/bin/python3"
+        (builtins.toJSON {
+          zenity = "${pkgs.zenity}/bin/zenity";
+          flatpak = "${config.services.flatpak.package or pkgs.flatpak}/bin/flatpak";
+          locations = appLocations;
+          declared = map (a: if builtins.isString a then a else a.appId or "")
+            ((appStore.apps or [ ]) ++ (appStore.extraPackages or [ ]));
+          inherit mover;
+        })
+      ]
+      (builtins.readFile (assets + "/app-drives.py"))
+  );
+  appDrivesTool = appDrivesScript "noid-app-drives" null;
+  appMover = terminalScript "nix-actions-app-drives" "app-drives.sh" { "@tool@" = q "${appDrivesTool}"; };
+  appDrives = appDrivesScript "nix-actions-app-drives-window" "${appMover}";
+
   passwords = pkgs.writeScript "nix-actions-passwords" (
     builtins.replaceStrings
       [ "#!/usr/bin/env python3" "@settings@" ]
@@ -248,27 +190,65 @@ let
       (builtins.readFile (assets + "/passwords.py"))
   );
 
-  # ---- the menu ---------------------------------------------------------------
+  windowScript = pkgs.writeScript "nix-actions-window" (
+    builtins.replaceStrings
+      [ "#!/usr/bin/env python3" "@settings@" ]
+      [
+        "#!${pkgs.python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3"
+        (builtins.toJSON {
+          flakeDir = config.myOS.flakeDir;
+          icons = "${assets + "/icons"}";
+          sync = if syncOn then "${syncTool}" else null;
+          inherit publisher cleanupText;
+          scripts = {
+            rebuild = "${rebuild}";
+            update = "${update}";
+            cleanup = "${cleanup}";
+            install = "${installRelease}";
+            publish = if syncOn && publisher then "${publish}" else null;
+          };
+          flakes = flakesCommand;
+          drives = lib.optionalString drivesOn "${drives}";
+          appDrives = lib.optionalString appDrivesOn "${appDrives}";
+          passwords = lib.optionalString passwordsOn "${passwords}";
+          driveList = lib.mapAttrs (_: d: { inherit (d) label fsType apps; }) (config.myOS.drives or { });
+          locations = lib.mapAttrsToList (_: l: l.name) appLocations;
+        })
+      ]
+      (builtins.readFile (assets + "/window.py"))
+  );
+
+  window = pkgs.stdenvNoCC.mkDerivation {
+    pname = "nix-actions-window";
+    version = "1";
+    dontUnpack = true;
+    nativeBuildInputs = [ pkgs.wrapGAppsHook4 pkgs.gobject-introspection ];
+    buildInputs = [ pkgs.gtk4 pkgs.libadwaita ];
+    installPhase = ''
+      install -Dm755 ${windowScript} $out/bin/nix-actions-window
+    '';
+  };
+
   menuCommand = lib.extendDerivation true
-    # (the scripts are also reachable from here, for looking at what was generated)
-    { scripts = { inherit rebuild update cleanup drives passwords secretWriter installRelease syncTool releases publish; }; }
+    { scripts = { inherit rebuild update cleanup drives passwords secretWriter installRelease syncTool releases publish appDrivesTool appMover appDrives window windowScript; }; }
     (pkgs.writeShellScriptBin "nix-actions" (fill
       {
-        "@zenity@" = q "${pkgs.zenity}/bin/zenity";
+        "@window@" = q "${window}/bin/nix-actions-window";
         "@rebuild@" = q "${rebuild}";
         "@update@" = q "${update}";
         "@cleanup@" = q "${cleanup}";
         "@drives@" = q (lib.optionalString drivesOn "${drives}");
         "@passwords@" = q (lib.optionalString passwordsOn "${passwords}");
+        "@appDrives@" = q (lib.optionalString appDrivesOn "${appDrives}");
         "@releases@" = q (lib.optionalString (syncOn && !publisher) "${releases}");
         "@publish@" = q (lib.optionalString (syncOn && publisher) "${publish}");
         "@flakes@" = q flakesCommand;
-        "@cleanupText@" = q cleanupText;
       }
       (builtins.readFile (assets + "/menu.sh"))));
 
+  # Named after the window's application id, so docks and task switchers match it to this entry.
   launcher = pkgs.makeDesktopItem {
-    name = "nix-actions";
+    name = "org.noid.NixActions";
     desktopName = "Nix Actions";
     genericName = "Rebuild, update, add programs, clean up";
     comment = "Rebuild or update NixOS, get the latest release, add programs from a link, free up disk space";
@@ -280,7 +260,6 @@ let
     keywords = [ "nix" "nixos" "rebuild" "update" "upgrade" "release" "publish" "flake" "clean" "garbage" "disk space" ];
   };
 
-  # ---- GNOME: shell extension ---------------------------------------------------
   gnomeExtensionUuid = "nixos-rebuild-button@nixos-config";
 
   gnomeExtension = pkgs.stdenvNoCC.mkDerivation {
@@ -298,7 +277,6 @@ let
     passthru.extensionUuid = gnomeExtensionUuid;
   };
 
-  # ---- Plasma: panel widget --------------------------------------------------
   plasmoidId = "org.nixos.rebuildbutton";
 
   plasmoid = pkgs.stdenvNoCC.mkDerivation {
@@ -315,7 +293,6 @@ let
     '';
   };
 
-  # Adds the widget to the panel once Plasma has started (see place-widget.js).
   placeWidget = pkgs.writeShellScript "place-nix-actions-widget" (
     builtins.replaceStrings
       [ "@busctl@" "@scriptFile@" ]
@@ -326,16 +303,7 @@ let
       (builtins.readFile (assets + "/place-widget.sh"))
   );
 
-  # ---- COSMIC: panel button -----------------------------------------------------
-  # cosmic-panel starts an "applet" for every id in its layout, from the desktop
-  # file of that name, and COSMIC ships one applet that does nothing but show an
-  # icon and open an app when pressed (cosmic-panel-button <desktop file id>).
-  # Three small pieces make the button:
-  #
-  #   cosmicApplet   the applet entry the panel is told to show (X-CosmicApplet
-  #                  also makes it appear in Settings -> Panel -> applets)
-  #   cosmicTarget   what that applet looks like (the icon) and runs
-  #   the icons      COSMIC's icon themes have no software-update icon
+  # cosmic-panel-button <id> shows the icon of desktop file <id> and runs it.
   cosmicApplet = "org.nixos.NixActionsButton";
   cosmicTarget = "org.nixos.NixActionsPanel";
 
@@ -360,17 +328,13 @@ let
     desktopName = "Nix Actions";
     comment = "Open the Nix Actions menu";
     exec = "${menuCommand}/bin/nix-actions";
-    icon = "nix-actions-symbolic"; # "-symbolic": the panel colours it like its other icons
+    icon = "nix-actions-symbolic";
     terminal = false;
     noDisplay = true;
   };
 
-  # The icons, and the top panel's default layout with the button added just
-  # left of the power button. The layout is the one COSMIC itself ships, copied
-  # at build time with one id inserted, so it stays what COSMIC says it should
-  # be after COSMIC updates. If that file is not as expected, the layout is
-  # left alone and only the button is missing; nothing else is affected.
-  # (hiPrio: the same file also comes from cosmic-panel, and this one wins.)
+  # COSMIC's own default panel layout with the button inserted before the power applet,
+  # copied at build time so it follows COSMIC updates. hiPrio: cosmic-panel ships the same file.
   cosmicDefaults = lib.hiPrio (pkgs.runCommand "nix-actions-cosmic-defaults" { } ''
     icons=$out/share/icons/hicolor/scalable/apps
     install -Dm444 ${assets + "/cosmic/nix-actions.svg"} $icons/nix-actions.svg
@@ -390,7 +354,7 @@ let
   '');
 in
 {
-  # The names this had when it was only the Rebuild button. Still work.
+  # Old option names from when this was only the Rebuild button.
   imports = [
     (lib.mkAliasOptionModule [ "module" "rebuild-button" "enable" ] [ "module" "nix-actions" "enable" ])
     (lib.mkAliasOptionModule [ "myOS" "rebuildButton" "plasmaAutoPlace" ] [ "myOS" "nixActions" "plasmaAutoPlace" ])
@@ -400,7 +364,7 @@ in
     mod.enableByDefault "the \"Nix Actions\" menu (rebuild, update, add a flake, clean up) and its panel button";
 
   options.module.sync.enable =
-    mod.enableByDefault "releases in Nix Actions: Get the latest release (or Publish changes, see myOS.sync.publish)";
+    mod.enableByDefault "releases in Nix Actions: Noid-OS Update (or Publish changes, see myOS.sync.publish)";
 
   options.myOS.sync.publish = lib.mkOption {
     type = lib.types.bool;
@@ -409,12 +373,11 @@ in
     description = ''
       This is the computer where the configuration is worked on: Nix Actions
       offers "Publish changes" (send flake.nix, flake.lock, lib/ and modules/ to
-      the other computers as a new release) instead of "Get the latest release".
+      the other computers as a new release) instead of "Noid-OS Update".
       Set it in hosts/users/user.nix of that one computer only.
     '';
   };
 
-  # (The folder it works in is myOS.flakeDir, see lib/options.nix.)
   options.myOS.nixActions.plasmaAutoPlace = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -447,7 +410,6 @@ in
     })
 
     (lib.mkIf isGnome {
-      # de-switch.nix installs this and switches it on for every user.
       myOS.gnomeExtensions = [ gnomeExtension ];
     })
 

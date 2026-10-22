@@ -1,11 +1,3 @@
-// A panel button for Nix Actions. Clicking it opens the Nix Actions menu (the
-// `nix-actions` command, installed by modules/common/nix-actions.nix), where
-// rebuilding, updating, adding a flake and cleaning up are chosen.
-//
-// Built like Plasma's own click-only widgets (Show Desktop, Icon): the icon is
-// the whole widget, and clicking or pressing Enter "activates" it. That also
-// makes a global keyboard shortcut for it possible (right-click > Configure).
-
 import QtQuick
 import QtQuick.Layouts
 
@@ -26,11 +18,8 @@ PlasmoidItem {
     Plasmoid.title: i18n("Nix Actions")
     Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
 
-    // Starts the menu. The time after the "#" is only there to make every click
-    // a new command for the "executable" engine (the shell ignores everything
-    // after the "#"). Without it, a click while an earlier one is still running
-    // would do nothing, and that one lasts as long as the terminal of a rebuild
-    // stays open.
+    // The " # <time>" suffix makes every click a new source for the executable engine;
+    // otherwise clicks are ignored while an earlier command (e.g. a rebuild) still runs.
     Plasmoid.onActivated: executable.connectSource(root.command + " # " + Date.now())
 
     Layout.minimumWidth: Kirigami.Units.iconSizes.medium
